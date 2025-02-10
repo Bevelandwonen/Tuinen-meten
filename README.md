@@ -1,41 +1,18 @@
-In dit project gebruiken we openbare data om het oppervlakte te berekenen voor meerdere woningen.
+Tuinen-meten is een open-source project dat gebruik maakt van open data om de oppervlakte van tuinen te meten. Dit project is ontworpen om de tuinruimtes van een woning corporatie in kaart te brengen.
 
-Stappen:
+Functies
+Automatische oppervlakteberekening: Gebruik satellietbeelden en geografische gegevens om nauwkeurig de oppervlakte van tuinen te meten.
 
+Installatie
 
-1.
+Installeer de vereiste pakketten:
+pip install -r requirements.txt
 
-
-
-2.
-
-
-
-3.
-
+Gebruik
+Start de applicatie:
+python main.py
 
 
-4.
-
-
-
-
-5.
-
-
-
-
-
-6.
-
-
-
-
-
-
-
-
-
-
-Referenties:
+Licentie
+Dit project is gelicentieerd onder de MIT-licentie. Zie het LICENSE bestand voor meer informatie.
 
