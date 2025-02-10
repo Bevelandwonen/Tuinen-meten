@@ -1,4 +1,3 @@
-Tuinen-meten
 Tuinen-meten is een open-source project dat gebruik maakt van open data om de oppervlakte van tuinen te meten. Dit project is ontworpen om de tuinruimtes van een woning corporatie in kaart te brengen.
 
 Functies
