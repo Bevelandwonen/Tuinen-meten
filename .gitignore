@@ -1,0 +1,33 @@
+
+# -----------------------------
+# Project data (DO NOT COMMIT)
+# -----------------------------
+data/
+results/
+
+# -----------------------------
+# Python artifacts
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# -----------------------------
+# Environment & secrets
+# -----------------------------
+.env
+.env.*
+
+# -----------------------------
+# OS / Editor noise
+# -----------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+``
