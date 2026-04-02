@@ -1,18 +1,46 @@
-Tuinen-meten is een open-source project dat gebruik maakt van open data om de oppervlakte van tuinen te meten. Dit project is ontworpen om de tuinruimtes van een woning corporatie in kaart te brengen.
-
-Functies
-Automatische oppervlakteberekening: Gebruik satellietbeelden en geografische gegevens om nauwkeurig de oppervlakte van tuinen te meten.
-
-Installatie
-
-Installeer de vereiste pakketten:
-pip install -r requirements.txt
-
-Gebruik
-Start de applicatie:
-python main.py
+#### INTRO TEXT
 
 
-Licentie
-Dit project is gelicentieerd onder de MIT-licentie. Zie het LICENSE bestand voor meer informatie.
 
+
+
+
+
+
+# STEPS:
+
+# Get data:
+Ga naar: https://app.pdok.nl/lv/bgt/download-viewer/
+- Selecteer het gebied
+- Download het bestand
+- Extract hem in data/bgt (We only need: bgt_wegdeel.gml and bgt_pand.gml)
+
+Ga naar: https://service.pdok.nl/lv/bag/atom/bag.xml
+- Download BAG geopackage
+- Extract deze in data/bag
+
+Ga naar: https://app.pdok.nl/kadaster/kadastralekaart/download-viewer/
+- Selecteer het gebied
+- Download het bestand
+- Extract hem in data/kad
+
+Zet lijst met bag_ids in data/bag_ids:
+- Naam bag_ids.xlsx of csv
+- Zorg dat de kolom: Pand Id aanwezig is.
+
+
+# Script runnen
+
+- Run plot_house_matcher.py
+Dit matched per eenheid het juiste perceel
+
+- Run inspect results.py
+Draw all results?
+
+
+- calc garden size manual
+-> zet zelf de grenzen
+
+
+
+add information about the different data types and files we load
