@@ -29,6 +29,13 @@ class DataBundle:
                 raise ValueError(f"{name} missing {missing}")
 
 @dataclass
+class HouseResult:
+    pand_id: str
+    storage_size: float
+    garden_size: float
+    classification: str
+
+@dataclass
 class Config:
     loc_bag: str | None = None
     loc_kadaster: str | None = None
