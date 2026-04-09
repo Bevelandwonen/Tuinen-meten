@@ -34,14 +34,14 @@ def first_intersection(
     origin: Point, 
     direction: tuple, 
     weg: gpd.GeoDataFrame, 
-    perceel: Polygon
+    plot: Polygon
 ) -> Point:
     
     """Return the first intersection point along a ray."""
 
     extension_length = 30
     road_union = weg.geometry.unary_union
-    perceel_boundary = perceel.boundary
+    plot_boundary = plot.boundary
 
     ray = LineString([
         (origin.x, origin.y),
@@ -51,7 +51,7 @@ def first_intersection(
 
     intersections = []
 
-    for geom in [road_union, perceel_boundary]:
+    for geom in [road_union, plot_boundary]:
         inter = ray.intersection(geom)
         print(type(inter))
         print(inter)
@@ -73,10 +73,10 @@ def first_intersection(
     intersections.sort(key=lambda x: x[0])
     return intersections[0][1]
 
-def _create_perceel_open(
+def _create_plot_open(
     house: gpd.GeoDataFrame, 
     shared_walls: Dict, 
-    perceel: Polygon, 
+    plot: Polygon, 
     weg: gpd.GeoDataFrame
 ) -> Polygon:
     
@@ -88,7 +88,7 @@ def _create_perceel_open(
     We take the first intersection with road or parcel boundary.
     """
 
-    perceel_lines = []
+    plot_lines = []
 
     for _, (start, end) in shared_walls.items():
 
@@ -99,18 +99,18 @@ def _create_perceel_open(
         unit = (dx / length, dy / length)
         reverse = (-unit[0], -unit[1])
 
-        p1 = first_intersection(start, unit, weg, perceel)
-        p2 = first_intersection(end, reverse, weg, perceel)
+        p1 = first_intersection(start, unit, weg, plot)
+        p2 = first_intersection(end, reverse, weg, plot)
 
         if p1 and p2:
-            perceel_lines.append([(p1.x, p1.y), (p2.x, p2.y)])
+            plot_lines.append([(p1.x, p1.y), (p2.x, p2.y)])
 
-    if len(perceel_lines) < 2:
+    if len(plot_lines) < 2:
         raise ValueError("Not enough intersection points found to create a polygon.")
 
-    print(perceel_lines)
+    print(plot_lines)
 
-    line1, line2 = perceel_lines[0], perceel_lines[1]
+    line1, line2 = plot_lines[0], plot_lines[1]
 
     d1 = Point(line1[0]).distance(Point(line2[0]))
     d2 = Point(line1[1]).distance(Point(line2[0]))
@@ -125,22 +125,22 @@ def _create_perceel_open(
 
     fig, ax = plt.subplots()
 
-    for line in perceel_lines:
+    for line in plot_lines:
         for p in line:
             ax.plot(p[0], p[1], 'ro')
 
-    gpd.GeoSeries(perceel).plot(ax=ax, edgecolor='black')
+    gpd.GeoSeries(plot).plot(ax=ax, edgecolor='black')
     house.plot(ax=ax, color='yellow', edgecolor='black')
 
     plt.show()
     
     return Polygon(combined_coords)
 
-def open_parcel(
+def open_plot(
     data: DataBundle, 
+    plot_poly: Polygon,
     gdf_bag_temp: gpd.GeoDataFrame, 
-    perceel_poly: Polygon,
-    gdf_perceel: gpd.GeoDataFrame,
+    gdf_plot: gpd.GeoDataFrame,
     gdf_weg_temp: gpd.GeoDataFrame
 ) -> List[Dict]:
 
@@ -151,30 +151,43 @@ def open_parcel(
     
     for _, row in gdf_bag_temp.iterrows():
         # With neighbourse
-        matches = utils.perceel_borders(gdf_bag_temp, row)
+        matches = utils.find_borders(gdf_bag_temp, row)
         #TODO: Check this line
         house = gdf_bag_temp[gdf_bag_temp["identificatie"] == row["identificatie"]]
+
+        #TODO: catch errors
+
         if len(matches) == 1:
             print("one match, dont have neighbours")
         elif len(matches) == 2:
-            print("two matches thus neibours")
-            new_poly = _create_perceel_open(house, matches, perceel_poly, gdf_weg_temp)
+            try:
+                print("two matches thus neibours")
+                new_poly = _create_plot_open(house, matches, plot_poly, gdf_weg_temp)
+            except Exception as e:
+                results.append({
+                    "Pand Id": row["identificatie"],
+                    "storage": None,
+                    "nieuw tuin opp": None,
+                    "classificatie": "open_error",
+                    "error": str(e)
+                })
+                continue
 
         storage, storage_size = utils.find_berging(new_poly, data.gdf_pand)
         garden_size = utils.calc_areas(gdf_weg_temp, new_poly, house, storage_size)
-        utils.visualise_house_perceel(gdf_perceel, new_poly, gdf_bag_temp, gdf_weg_temp, storage)
+        utils.visualise_house_plot(gdf_plot, new_poly, gdf_bag_temp, gdf_weg_temp, storage)
 
         print(f"Tuin opp = {garden_size:.1f}m², Berging opp = {storage_size:.1f}m²")
 
-        ax = gdf_perceel.plot(color='blue', edgecolor='black')
+        ax = gdf_plot.plot(color='blue', edgecolor='black')
         gdf_bag_temp.plot(ax=ax, color='red', edgecolor='black')
         house.plot(ax=ax, color='yellow', edgecolor='black')
         gdf_weg_temp.plot(ax=ax, color="green")
         #put new poly in gpd so we can visualise it
-        new_poly_gdf = gpd.GeoDataFrame(geometry=[new_poly], crs=gdf_perceel.crs)
+        new_poly_gdf = gpd.GeoDataFrame(geometry=[new_poly], crs=gdf_plot.crs)
 
         new_poly_gdf.plot(ax=ax, color="orange", edgecolor='black')
-        gdf_pand_within = data.gdf_pand[data.gdf_pand.geometry.within(perceel_poly)]
+        gdf_pand_within = data.gdf_pand[data.gdf_pand.geometry.within(plot_poly)]
         gdf_pand_within.plot(ax=ax, color="pink")
 
         fig = ax.get_figure()

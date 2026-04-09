@@ -8,6 +8,7 @@ import numpy as np
 from datatypes import DataBundle
 from shapely.geometry import Point
 from shapely.geometry import box as BoundingBox
+import math
 
 def _generate_lines(points: list) -> list:
     """Create lines between points"""
@@ -20,15 +21,41 @@ def _generate_lines(points: list) -> list:
 def truncate_coordinates(line: LineString) -> LineString:
     return LineString([(int(x * 10) / 10.0, int(y * 10) / 10.0) for x, y in line.coords])
 
+def extend_line_through_polygon(line: LineString, plot: Polygon) -> LineString:
+    """Extend a line through a polygon, it always intersect the polygon twice."""
+
+    start, end = line.coords[0], line.coords[-1]
+
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+
+    length = math.hypot(dx, dy)
+    if length == 0:
+        raise ValueError("Cannot extend a zero-length line")
+
+    # Unit direction vector
+    ux = dx / length
+    uy = dy / length
+
+    minx, miny, maxx, maxy = plot.bounds
+    bbox_size = max(maxx - minx, maxy - miny)
+
+    extension = bbox_size * 2
+
+    return LineString([
+        (start[0] - extension * ux, start[1] - extension * uy),
+        (end[0] + extension * ux, end[1] + extension * uy),
+    ])
+
 def find_berging(
-    house_perceel: Polygon, 
+    house_plot: Polygon, 
     buildings: gpd.GeoDataFrame
 ) -> Tuple[gpd.GeoDataFrame, float]:
-    """Find storage buildings in perceel and calculate total area."""
+    """Find storage buildings in plot and calculate total area."""
 
-    # Find buildings that overlap with perceel
+    # Find buildings that overlap with plot
     storage = buildings[
-        (buildings.geometry.intersects(house_perceel)) & 
+        (buildings.geometry.intersects(house_plot)) & 
         (buildings.geometry.type == 'MultiPolygon')
     ].copy()
         
@@ -37,19 +64,19 @@ def find_berging(
         
     # Calculate overlap areas
     storage['overlap'] = storage.geometry.apply(
-        lambda x: house_perceel.intersection(x).area
+        lambda x: house_plot.intersection(x).area
     )
     
     # Get building with maximum overlap
     max_storage = storage.loc[storage['overlap'].idxmax()]
     return gpd.GeoDataFrame([max_storage]), float(max_storage['overlap'])
 
-def check_perceel_type(
-    df_perceel_eenheden: pd.DataFrame, 
+def check_plot_type(
+    df_plot_eenheden: pd.DataFrame, 
     gdf_bag_temp: gpd.GeoDataFrame
 ) -> str:
     
-    if df_perceel_eenheden.shape[0] == 1:
+    if df_plot_eenheden.shape[0] == 1:
         return "single"
     #TODO: clean check_houses function. does it need the line as output
     elif check_houses_aligned(gdf_bag_temp)[0]:
@@ -57,22 +84,22 @@ def check_perceel_type(
     else:
         return "open"
 
-def visualise_house_perceel(
-    perceel: gpd.GeoDataFrame,
-    house_perceel: gpd.GeoSeries,
+def visualise_house_plot(
+    plot: gpd.GeoDataFrame,
+    house_plot: gpd.GeoSeries,
     houses: gpd.GeoDataFrame,
     road: gpd.GeoDataFrame,
     storage: gpd.GeoDataFrame
 ) -> None:
-    """Visualize the house, perceel, road and storage buildings on a single plot."""
-    house_perceel = gpd.GeoDataFrame(geometry=[house_perceel])
+    """Visualize the house, plot, road and storage buildings on a single plot."""
+    house_plot = gpd.GeoDataFrame(geometry=[house_plot])
 
-    ax = perceel.plot(color='blue', edgecolor='black', figsize=(8, 8))
+    ax = plot.plot(color='blue', edgecolor='black', figsize=(8, 8))
     # Move window to specific position (x=100, y=100 pixels from top-left)
     figManager = plt.get_current_fig_manager()
     figManager.window.wm_geometry("+900+100")  # Change these numbers to position the window
     
-    house_perceel.plot(ax=ax, color="yellow")
+    house_plot.plot(ax=ax, color="yellow")
     houses.plot(ax=ax, color='red', edgecolor='black')
     road.plot(ax=ax, color="green")
 
@@ -99,19 +126,104 @@ def visualise_house_perceel(
 
     return None
 
+
+
+import geopandas as gpd
+from shapely.geometry import Polygon
+
+try:
+    from shapely.validation import make_valid
+except Exception:
+    make_valid = None
+
+
+def _fix_geom(geom):
+    """Make geometry valid enough for overlay operations."""
+    if geom is None or geom.is_empty:
+        return geom
+    if geom.is_valid:
+        return geom
+    if make_valid is not None:
+        return make_valid(geom)
+    return geom.buffer(0)  # fallback
+
+
 def calc_areas(
+    roads: gpd.GeoDataFrame | None,
+    plot: Polygon,
+    house: gpd.GeoDataFrame,
+    storage_size: float
+) -> float:
+    """Calculate the garden size by subtracting roads, house and storage from plot."""
+
+    if plot is None:
+        raise ValueError("plot is None")
+
+    if house is None or house.empty:
+        raise ValueError("house is empty/None")
+    if house.crs is None:
+        raise ValueError("house.crs is None")
+
+    # If roads are provided, they must have a CRS. If roads is empty/None, that's OK.
+    if roads is not None and not roads.empty and roads.crs is None:
+        raise ValueError("roads.crs is None")
+
+    plot_geom = _fix_geom(plot)
+    plot_area = float(plot_geom.area)
+
+    # ----------------------
+    # Roads area (optional)
+    # ----------------------
+    road_area = 0.0
+    if roads is not None and not roads.empty:
+        roads_fixed = roads.copy()
+
+        # Fix invalid road geometries
+        bad = ~roads_fixed.geometry.is_valid
+        if bad.any():
+            roads_fixed.loc[bad, "geometry"] = roads_fixed.loc[bad, "geometry"].apply(_fix_geom)
+
+        # drop empties / Nones
+        roads_fixed = roads_fixed[roads_fixed.geometry.notna() & ~roads_fixed.geometry.is_empty]
+
+        if not roads_fixed.empty:
+            # Clip to plot
+            try:
+                roads_in_plot = gpd.clip(roads_fixed, plot_geom)
+            except Exception:
+                # fallback repair on plot (in case of topology issues)
+                plot_geom2 = _fix_geom(plot_geom)
+                roads_in_plot = gpd.clip(roads_fixed, plot_geom2)
+
+            road_area = float(roads_in_plot.area.sum())
+
+    # ----------------------
+    # House area
+    # ----------------------
+    house_geom = _fix_geom(house.geometry.iloc[0])
+    house_area = float(house_geom.intersection(plot_geom).area)
+
+    garden_area = plot_area - road_area - house_area - float(storage_size)
+    return max(0.0, garden_area)
+
+
+
+
+
+
+def calc_areas2(
     roads: gpd.GeoDataFrame, 
-    perceel: Polygon, 
+    plot: Polygon, 
     house: gpd.GeoDataFrame, 
     storage_size: float
 ) -> float:
-    """Calculate the garden size by subtracting roads, house and storage from perceel.
+    """Calculate the garden size by subtracting roads, house and storage from plot.
     
     Args:
         roads: GeoDataFrame containing road geometries
-        perceel: Polygon representing the complete perceel
+        plot: Polygon representing the complete plot
         house: GeoDataFrame containing house geometry
-        storage_size: Size of storage buildings in the perceel
+        storage_size: Size of storage buildings in the plot
     
     Returns:
         float: Calculated garden size in square meters
@@ -120,18 +232,18 @@ def calc_areas(
         ValueError: If inputs are invalid or CRS mismatchn
     """
 
-    perceel_gdf = gpd.GeoDataFrame(geometry=[perceel], crs=roads.crs)
+    plot_gdf = gpd.GeoDataFrame(geometry=[plot], crs=roads.crs)
 
     # Validate CRS match
-    if roads.crs != perceel_gdf.crs:
-        raise ValueError(f"CRS mismatch: roads={roads.crs}, perceel={perceel_gdf.crs}")
+    if roads.crs != plot_gdf.crs:
+        raise ValueError(f"CRS mismatch: roads={roads.crs}, plot={plot_gdf.crs}")
 
     roads_dissolved = roads.dissolve()
-    intersection = roads_dissolved.intersection(perceel_gdf.union_all())
+    intersection = roads_dissolved.intersection(plot_gdf.union_all())
     road_area = intersection.area.sum()
     house_area = house.area.values[0]
 
-    garden_size = perceel.area - (road_area + house_area + storage_size)
+    garden_size = plot.area - (road_area + house_area + storage_size)
     return garden_size
 
 def check_houses_aligned(
@@ -164,7 +276,7 @@ def check_houses_aligned(
     return False, None
 
 
-def perceel_borders(
+def find_borders(
     gdf: gpd.GeoDataFrame, 
     eenheid: gpd.GeoSeries
 ) -> Dict:
@@ -172,19 +284,16 @@ def perceel_borders(
     """This function finds the amount of connected neighbours for a single house.
        It does this by checking if the lines of the house intersect with the lines of the neighbours.
 
-       param:
-
-
        returns: dict: with the neighbours as keys and the lines as values
     
     """
     # The house we are checking
-    perceel_points = eenheid["geometry"]
+    plot_points = eenheid["geometry"]
 
-    # All house in perceel -> exclude the house we are checking
+    # All house in plot -> exclude the house we are checking
     gdf_neighbours = gdf[gdf["identificatie"] != eenheid["identificatie"]]
     neighbours_found = {}
-    eenheid_walls = _generate_lines(list(perceel_points.exterior.coords))
+    eenheid_walls = _generate_lines(list(plot_points.exterior.coords))
 
     # For every wall of the house
     for wall in eenheid_walls:
