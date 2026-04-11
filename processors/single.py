@@ -1,8 +1,10 @@
-from . import utils
-import geopandas as gpd
-from datatypes import DataBundle, HouseResult
-from shapely.geometry.polygon import Polygon
 from typing import List
+
+import geopandas as gpd
+from shapely.geometry.polygon import Polygon
+
+from . import utils
+from datatypes import DataBundle, HouseResult
 
 def single_house(
     data: DataBundle, 
