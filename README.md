@@ -32,7 +32,7 @@ Zet lijst met bag_ids in data/bag_ids:
 # Script runnen
 
 - Run plot_house_matcher.py
-Dit matched per eenheid het juiste perceel
+Dit matched per eenheid het juiste plot
 
 - Run inspect results.py
 Draw all results?

@@ -17,7 +17,7 @@ def update_plot(ax, points):
     """Update plot with current points and lines."""
     ax.cla()  # Clear previous points
     # Redraw base layers
-    gdf_perceel.plot(ax=ax, color='blue', edgecolor='black')
+    gdf_plot.plot(ax=ax, color='blue', edgecolor='black')
     gdf_bag_temp.plot(ax=ax, color='red', edgecolor='black')
     house.plot(ax=ax, color='yellow', edgecolor='black')
     gdf_weg_temp.plot(ax=ax, color="green")
@@ -52,7 +52,7 @@ if __name__ == "__main__":
     parser.add_argument('--tobias-path', help='Path to Tobias Excel file')
     parser.add_argument('--road-path', help='Path to road dataset')
     parser.add_argument('--pand-path', help='Path to pand dataset')
-    parser.add_argument('--perceel-eenheid-path', help='Path to perceel-eenheid dataset')
+    parser.add_argument('--plot-eenheid-path', help='Path to plot-eenheid dataset')
     args = parser.parse_args()
 
     config = utility.Config.default_config("set_garden_manual")
@@ -66,23 +66,23 @@ if __name__ == "__main__":
         print("Processing full dataset...")
 
     gdf_bag, gdf_kad, _, gdf_road, gdf_bgt_pand, _, df_eenheid_nieuw, _, _ = utility.load_data(config, bbox)
-    df_eenheid_perceel_filtered = df_eenheid_nieuw.dropna(subset=["Perceelnummer"])
+    df_eenheid_plot_filtered = df_eenheid_nieuw.dropna(subset=["Perceelnummer"])
 
-    for perceelnummer in df_eenheid_perceel_filtered["Perceelnummer"].unique():
-        df_perceel_eenheden = df_eenheid_perceel_filtered[df_eenheid_perceel_filtered["Perceelnummer"] == perceelnummer]
-        df_perceel_eenheden.reset_index(drop=True, inplace=True)
-        gdf_perceel = gdf_kad[(gdf_kad["perceelLinks"] == perceelnummer) | (gdf_kad["perceelRechts"] == perceelnummer)]
-        gdf_bag_temp = gdf_bag[gdf_bag["identificatie"].isin(df_perceel_eenheden["Pand Id"])]
+    for plotnummer in df_eenheid_plot_filtered["Perceelnummer"].unique():
+        df_plot_eenheden = df_eenheid_plot_filtered[df_eenheid_plot_filtered["Perceelnummer"] == plotnummer]
+        df_plot_eenheden.reset_index(drop=True, inplace=True)
+        gdf_plot = gdf_kad[(gdf_kad["perceelLinks"] == plotnummer) | (gdf_kad["perceelRechts"] == plotnummer)]
+        gdf_bag_temp = gdf_bag[gdf_bag["identificatie"].isin(df_plot_eenheden["Pand Id"])]
 
         try:
-            perceel_poly = Polygon(utility.create_perceel_polygon(gdf_perceel["geometry"]))
+            plot_poly = Polygon(utility.create_plot_polygon(gdf_plot["geometry"]))
         except Exception:
             continue
 
-        if df_perceel_eenheden.shape[0] > 1:
+        if df_plot_eenheden.shape[0] > 1:
             aligned, line = utility.check_houses_aligned(gdf_bag_temp)
 
-            print("perceel nummer:", perceelnummer)
+            print("plot nummer:", plotnummer)
 
             for _, row in gdf_bag_temp.iterrows():
                 check_temp = df_eenheid_nieuw[df_eenheid_nieuw["Pand Id"] == row["identificatie"]]
@@ -93,12 +93,12 @@ if __name__ == "__main__":
                     print(check_temp["BAG Naamgeving object"])
                     print(check_temp["class"], check_temp["nieuw tuin opp"])
                     house = gdf_bag_temp[gdf_bag_temp["identificatie"] == row["identificatie"]]
-                    ax = gdf_perceel.plot(color='blue', edgecolor='black')
+                    ax = gdf_plot.plot(color='blue', edgecolor='black')
                     gdf_bag_temp.plot(ax=ax, color='red', edgecolor='black')
                     house.plot(ax=ax, color='yellow', edgecolor='black')
                     gdf_weg_temp = gdf_road[gdf_road.intersects(gdf_bag_temp.union_all())]
                     gdf_weg_temp.plot(ax=ax, color="green")
-                    gdf_bgt_pand_within = gdf_bgt_pand[gdf_bgt_pand.geometry.within(perceel_poly)]
+                    gdf_bgt_pand_within = gdf_bgt_pand[gdf_bgt_pand.geometry.within(plot_poly)]
                     gdf_bgt_pand_within.plot(ax=ax, color="pink")
 
                     points = []
@@ -109,12 +109,12 @@ if __name__ == "__main__":
                     ax.legend()
                     plt.show()
                     
-                    # Create new small perceel
+                    # Create new small plot
                     if len(points) != 0:
                         points.append(points[0])
                         new_poly = Polygon(points)
                         
-                        gdf_weg_temp = gdf_road[gdf_road.intersects(gdf_perceel.union_all())]
+                        gdf_weg_temp = gdf_road[gdf_road.intersects(gdf_plot.union_all())]
                         storage, storage_size = utility.find_berging(new_poly, gdf_bgt_pand)
                         garden_size = utility.calc_areas(gdf_weg_temp, new_poly, house, storage_size)
                     else:

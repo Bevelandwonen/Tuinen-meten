@@ -1,14 +1,12 @@
-from typing import Dict, Tuple, Optional
-import geopandas as gpd
-import pandas as pd
-from shapely.geometry import LineString, Polygon
-import matplotlib.pyplot as plt
-import geopandas as gpd
-import numpy as np
-from datatypes import DataBundle
-from shapely.geometry import Point
-from shapely.geometry import box as BoundingBox
 import math
+from typing import Dict, Optional, Tuple
+
+import geopandas as gpd
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import box as BoundingBox
 
 def _generate_lines(points: list) -> list:
     """Create lines between points"""
@@ -23,7 +21,8 @@ def truncate_coordinates(line: LineString) -> LineString:
 
 def extend_line_through_polygon(line: LineString, plot: Polygon) -> LineString:
     """Extend a line through a polygon, it always intersect the polygon twice."""
-
+    print(line)
+    print(type(line))
     start, end = line.coords[0], line.coords[-1]
 
     dx = end[0] - start[0]
@@ -126,16 +125,10 @@ def visualise_house_plot(
 
     return None
 
-
-
-import geopandas as gpd
-from shapely.geometry import Polygon
-
 try:
     from shapely.validation import make_valid
 except Exception:
     make_valid = None
-
 
 def _fix_geom(geom):
     """Make geometry valid enough for overlay operations."""
@@ -146,7 +139,6 @@ def _fix_geom(geom):
     if make_valid is not None:
         return make_valid(geom)
     return geom.buffer(0)  # fallback
-
 
 def calc_areas(
     roads: gpd.GeoDataFrame | None,
@@ -205,11 +197,6 @@ def calc_areas(
 
     garden_area = plot_area - road_area - house_area - float(storage_size)
     return max(0.0, garden_area)
-
-
-
-
-
 
 def calc_areas2(
     roads: gpd.GeoDataFrame, 

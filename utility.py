@@ -5,7 +5,8 @@ from typing import List, Optional
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import LineString, Polygon, BoundingBox
+from shapely.geometry import LineString, Polygon
+from shapely.geometry import box as BoundingBox
 from shapely.ops import polygonize, unary_union
 from shapely.validation import make_valid
 

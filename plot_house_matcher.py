@@ -59,20 +59,20 @@ def plot_all_parcels(parcels: gpd.GeoDataFrame, figsize=(10, 10)):
 
 def _build_parcel_polygons_from_lines(
     gdf_kad_lines: gpd.GeoDataFrame,
-    perceel_nummers: Optional[List[str]] = None,
+    plot_nummers: Optional[List[str]] = None,
     left_col: str = "perceelLinks",
     right_col: str = "perceelRechts",
 ) -> gpd.GeoDataFrame:
     """
-    From cadastral boundary lines (LineString), build one polygon per perceel.
+    From cadastral boundary lines (LineString), build one polygon per plot.
 
     Returns GeoDataFrame with:
-      - 'Perceelnummer' (str)
+      - 'plotnummer' (str)
       - 'borders_amount' (int)  # number of lines used
       - geometry (Polygon)
     """
 
-    # Long format: one record per (line, perceel side)
+    # Long format: one record per (line, plot side)
 
 
     left = gdf_kad_lines[[left_col, "geometry"]].rename(columns={left_col: "Perceelnummer"})
@@ -81,16 +81,16 @@ def _build_parcel_polygons_from_lines(
     long = pd.concat([left, right], ignore_index=True)
     long = long.dropna(subset=["Perceelnummer"])
     #only keep the ones containing the filter_num
-    if perceel_nummers is not None:
-        keep = set(perceel_nummers)
+    if plot_nummers is not None:
+        keep = set(plot_nummers)
         long = long[long["Perceelnummer"].isin(keep)]
 
-    # Count lines per perceel (for borders_amount)
+    # Count lines per plot (for borders_amount)
     counts = long.groupby("Perceelnummer", as_index=False)["geometry"].size()
     counts = counts.rename(columns={"size": "borders_amount"})
-    # Polygonize per perceel
+    # Polygonize per plot
     records = []
-    for perceel, group in long.groupby("Perceelnummer"):
+    for plot, group in long.groupby("Perceelnummer"):
         try:
             merged = unary_union(list(group.geometry.values))
             polys = list(polygonize(merged))
@@ -101,7 +101,7 @@ def _build_parcel_polygons_from_lines(
             poly = _safe_make_valid(poly)
             if poly is None or poly.is_empty:
                 continue
-            records.append({"Perceelnummer": perceel, "geometry": poly})
+            records.append({"Perceelnummer": plot, "geometry": poly})
         except Exception:
             # skip bad groups quietly
             continue
@@ -115,16 +115,16 @@ def _build_parcel_polygons_from_lines(
     parcels = parcels.sort_values("geometry", key=lambda s: s.area if hasattr(s, "area") else s).drop_duplicates("Perceelnummer", keep="last")
     return parcels
 
-def find_perceel_nummer_per_eenheid(
+def find_plot_nummer_per_eenheid(
     df_tobias: pd.DataFrame,
     gdf_kad_lines: gpd.GeoDataFrame,
     gdf_bag: gpd.GeoDataFrame,
-    perceel_nummers: List[str],
+    plot_nummers: List[str],
     out_file: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Fast version:
-      1) build parcel polygons per perceel from boundary lines,
+      1) build parcel polygons per plot from boundary lines,
       2) point-in-polygon join of BAG centroids to parcels,
       3) pick smallest borders_amount per BAG unit,
       4) merge back to Tobias.
@@ -141,15 +141,15 @@ def find_perceel_nummer_per_eenheid(
     if gdf_kad_lines.crs != gdf_bag.crs:
         gdf_bag = gdf_bag.to_crs(gdf_kad_lines.crs)
 
-    # --- Build parcel polygons from lines (ONLY for the perceel_nummers you care about)
-    parcels = _build_parcel_polygons_from_lines(gdf_kad_lines, perceel_nummers)
+    # --- Build parcel polygons from lines (ONLY for the plot_nummers you care about)
+    parcels = _build_parcel_polygons_from_lines(gdf_kad_lines, plot_nummers)
     if parcels.empty:
         # nothing to match; return df unchanged
         if out_file:
             df_tobias.to_parquet(out_file, index=False)
         return df_tobias
 
-    # Set parcels index to perceelnummer so sjoin carries it via 'index_right'
+    # Set parcels index to plotnummer so sjoin carries it via 'index_right'
     parcels = parcels.set_index("Perceelnummer", drop=True)
     # --- Prepare BAG centroids only for Tobias Pand Ids
     bag = gdf_bag[gdf_bag["identificatie"].isin(df_tobias["Pand ID"])][["identificatie", "geometry"]].copy()
@@ -159,9 +159,9 @@ def find_perceel_nummer_per_eenheid(
     # Result has columns: ['identificatie', 'geometry', 'index_right']
     matches = gpd.sjoin(bag, parcels[["geometry"]], how="inner", predicate="within")
     print("amount of matches found:", len(matches))
-    # Rename 'index_right' to 'Perceelnummer' (since parcels index IS the perceelnummer)
+    # Rename 'index_right' to 'plotnummer' (since parcels index IS the plotnummer)
     matches = matches.rename(columns={"index_right": "Perceelnummer"})
-    # Attach borders_amount from parcels (indexed by Perceelnummer)
+    # Attach borders_amount from parcels (indexed by plotnummer)
     matches = matches.join(parcels[["borders_amount"]], on="Perceelnummer")
     # In case a centroid falls within multiple parcels (overlaps), keep smallest borders_amount
     # if part of pand falls outside of parcel lines, huse the bigger one
@@ -190,23 +190,23 @@ def main():
     parser.add_argument('--tobias-path', help='Path to Tobias Excel file')
     args = parser.parse_args()
 
-    config = Config.default_config("perceel_eenheid_matcher")
+    config = Config.default_config("plot_eenheid_matcher")
     bbox = None
 
     print("Processing full dataset...")
 
     gdf_bag, gdf_kad, df_tobias, _, _, _, _, loc_bag, loc_kad = load_data(config, bbox)
-    # Get unique perceel numbers
+    # Get unique plot numbers
 
-    perceel_nummers = list(set(gdf_kad["perceelLinks"].tolist() + gdf_kad["perceelRechts"].tolist()))
-    print(f"Processing {len(perceel_nummers)} perceel numbers")
+    plot_nummers = list(set(gdf_kad["perceelLinks"].tolist() + gdf_kad["perceelRechts"].tolist()))
+    print(f"Processing {len(plot_nummers)} plot numbers")
 
-    # Check if an output file already exists if it does, check perceel_nummers already found
+    # Check if an output file already exists if it does, check plot_nummers already found
     if "Perceelnummer" in df_tobias.columns:
-        perceel_nummers = [perceel for perceel in perceel_nummers if perceel not in df_tobias["Perceelnummer"].unique()]
-        print(f"Found {len(perceel_nummers)} new perceel numbers to process")
+        plot_nummers = [plot for plot in plot_nummers if plot not in df_tobias["Perceelnummer"].unique()]
+        print(f"Found {len(plot_nummers)} new plot numbers to process")
 
-    df_tobias = find_perceel_nummer_per_eenheid(df_tobias, gdf_kad, gdf_bag, perceel_nummers)
+    df_tobias = find_plot_nummer_per_eenheid(df_tobias, gdf_kad, gdf_bag, plot_nummers)
 
     #find path to this script
     output_file = os.path.join(os.path.dirname(__file__), "data", "output", f"ids_with_parcel.xlsx")
