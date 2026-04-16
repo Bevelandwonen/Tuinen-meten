@@ -5,7 +5,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry import box as BoundingBox
 
 def _generate_lines(points: list) -> list:
@@ -92,7 +92,7 @@ def visualise_house_plot(
 ) -> None:
     """Visualize the house, plot, road and storage buildings on a single plot."""
     house_plot = gpd.GeoDataFrame(geometry=[house_plot])
-
+    #print full linestring house plot
     ax = plot.plot(color='blue', edgecolor='black', figsize=(8, 8))
     # Move window to specific position (x=100, y=100 pixels from top-left)
     figManager = plt.get_current_fig_manager()
@@ -162,6 +162,16 @@ def calc_areas(
 
     plot_geom = _fix_geom(plot)
     plot_area = float(plot_geom.area)
+    print(plot_geom)
+    print(plot_area)
+
+
+    plot_geom = _fix_geom(plot)
+
+    if not isinstance(plot_geom, (Polygon, MultiPolygon)):
+        raise ValueError(
+            f"plot_geom must be Polygon or MultiPolygon, got {type(plot_geom)}"
+        )
 
     # ----------------------
     # Roads area (optional)
@@ -185,6 +195,7 @@ def calc_areas(
             except Exception:
                 # fallback repair on plot (in case of topology issues)
                 plot_geom2 = _fix_geom(plot_geom)
+                print(type(plot_geom), type(plot_geom2))
                 roads_in_plot = gpd.clip(roads_fixed, plot_geom2)
 
             road_area = float(roads_in_plot.area.sum())

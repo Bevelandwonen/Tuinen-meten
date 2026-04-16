@@ -34,6 +34,7 @@ class HouseResult:
     storage_size: float
     garden_size: float
     classification: str
+    error: str | None = None
 
 @dataclass
 class Config:

@@ -10,7 +10,7 @@ from shapely.geometry import box as BoundingBox
 from shapely.ops import polygonize, unary_union
 from shapely.validation import make_valid
 
-from .datatypes import Config, DataBundle
+from datatypes import Config, DataBundle
 
 warnings.filterwarnings("ignore")
 

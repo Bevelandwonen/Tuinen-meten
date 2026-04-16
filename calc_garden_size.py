@@ -88,9 +88,9 @@ if __name__ == "__main__":
         elif parcel_type == "multiple_aligned":
             print("multiple aligned")
             multiple_aligned(data, plot_poly, gdf_bag_in_plot, gdf_plot, gdf_road_in_plot)
-        else:
-            print("open")
-            #open_plot(data, plot_poly, gdf_bag_in_plot, gdf_plot, gdf_road_in_plot)
+        #else:
+           # print("open")
+           # open_plot(data, plot_poly, gdf_bag_in_plot, gdf_plot, gdf_road_in_plot, True)
 
     #df_results = df_results.set_index("Pand Id")
     #df_final = df_eenheid_plot.set_index("Pand Id")

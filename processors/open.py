@@ -27,6 +27,9 @@ def extract_points(geom: Polygon) -> List[Point]:
         for line in geom.geoms:
             points.append(Point(list(line.coords)[0]))
             points.append(Point(list(line.coords)[-1]))
+    elif geom.geom_type == "GeometryCollection":
+        for g in geom.geoms:
+            points.extend(extract_points(g))
     return points
 
 def _first_intersection(
@@ -36,9 +39,13 @@ def _first_intersection(
     plot: Polygon
 ) -> Point:
     
-    """Return the first intersection point along a ray."""
+    """Return the first intersection point along a ray. If the intersection is too close to the origin, it is ignored. If there are no valid intersections, return None."""
 
-    extension_length = 30
+    #TODO: Should add a check if we intersect a different house 
+    # or something before hitting the road or plot boundary.
+    # Add data?
+
+    extension_length = 50
     road_union = weg.geometry.unary_union
     plot_boundary = plot.boundary
 
@@ -49,26 +56,43 @@ def _first_intersection(
     ])
 
     intersections = []
-
+    # print the amount of different geometries
+    #check shape?
+    counter = 0
     for geom in [road_union, plot_boundary]:
+        #TODO: WHy does this function return different types of geoms?
         inter = ray.intersection(geom)
         if not inter.is_empty:
             points = extract_points(inter)
+            """
+            print(points)
+            fig, ax = plt.subplots(figsize=(8, 8))
+            gpd.GeoSeries(road_union).plot(ax=ax, color='green', linewidth=1, zorder=1)
+            gpd.GeoSeries(plot_boundary).plot(ax=ax, color='blue', linewidth=1, zorder=1)
+            gpd.GeoSeries(ray).plot(ax=ax, color='orange', linewidth=2, zorder=2)
+            if points:
+                    gpd.GeoSeries(points).plot(ax=ax, color='red', markersize=50, zorder=3)
+            plt.show()
+            """
 
             for p in points:
                 dist = origin.distance(p)
+                intersections.append((dist, p))
 
-                # ignore intersection at the starting point
-                if dist > 1e-6:
-                    intersections.append((dist, p))
 
+        counter += 1
     if not intersections:
         return None
+
+    # if there is more than one point, remove point that have a dist < 1e-5 (the starting point)
+    # because we have other valid options
+    if len(intersections) > 1:
+        intersections = [(dist, p) for dist, p in intersections if dist > 1e-1]
 
     intersections.sort(key=lambda x: x[0])
     return intersections[0][1]
 
-#TODO: this functino is almost the same as _create_plot from multiple_aligned.py
+#TODO: this function is almost the same as _create_plot from multiple_aligned.py
 def _create_plot_open(
     shared_walls: Dict, 
     plot: Polygon, 
@@ -76,7 +100,7 @@ def _create_plot_open(
 ) -> Polygon:
     
     """
-    Create a parcel for an open house.
+    Create a parcel for a house on an open plot.
     For each wall (A,B) we cast two rays:
         A -> B direction
         B -> A direction
@@ -84,9 +108,7 @@ def _create_plot_open(
     """
 
     plot_lines = []
-
     for _, (start, end) in shared_walls.items():
-
         dx = end.x - start.x
         dy = end.y - start.y
         length = (dx**2 + dy**2) ** 0.5
@@ -107,7 +129,6 @@ def _create_plot_open(
 
     d1 = Point(line1[0]).distance(Point(line2[0]))
     d2 = Point(line1[1]).distance(Point(line2[0]))
-
     if d1 > d2:
         combined_coords = line1 + line2
     else:
@@ -115,7 +136,6 @@ def _create_plot_open(
 
     if combined_coords[0] != combined_coords[-1]:
         combined_coords.append(combined_coords[0])
-    
     return Polygon(combined_coords)
 
 def open_plot(
@@ -127,16 +147,15 @@ def open_plot(
     visualise: bool = False
 ) -> List[Dict]:
 
-
     results = []
     
     for _, row in gdf_bag_in_plot.iterrows():
-        # With neighbourse
         neighbours = utils.find_borders(gdf_bag_in_plot, row)
         #TODO: Check this line
         house = gdf_bag_in_plot[
             gdf_bag_in_plot["identificatie"] == row["identificatie"]
         ]
+        print("dit is 1 woning", row["identificatie"])
 
         neighbour_count = len(neighbours)
 
@@ -145,9 +164,9 @@ def open_plot(
             results.append(
                 HouseResult(
                     pand_id=row["identificatie"],
-                    storage=None,
-                    nieuw_tuin_opp=None,
-                    classificatie="open_no_neighbours",
+                    storage_size=None,
+                    garden_size=None,
+                    classification="open_no_neighbours",
                     error=f"Expected 1 or 2 neighbours, found {neighbour_count}"
                 )
             )
@@ -157,17 +176,28 @@ def open_plot(
             results.append(
                 HouseResult(
                     pand_id=row["identificatie"],
-                    storage=None,
-                    nieuw_tuin_opp=None,
-                    classificatie="open_one_neighbour",
+                    storage_size=None,
+                    garden_size=None,
+                    classification="open_one_neighbour",
                     error="Only one neighbour found, cannot determine plot shape"
                 )
             )
             continue
         
         else:
-            print("two matches thus neibours")
-            new_poly = _create_plot_open(house, neighbours, plot_poly, gdf_weg_in_plot)
+            try:
+                new_poly = _create_plot_open(neighbours, plot_poly, gdf_weg_in_plot)
+            except Exception as e:
+                results.append(
+                    HouseResult(
+                        pand_id=row["identificatie"],
+                        storage_size=None,
+                        garden_size=None,
+                        classification="open_with_two_neighbours",
+                        error=f"Failed to create plot polygon: {e}"
+                    )
+                )
+                continue
             storage, storage_size = utils.find_berging(new_poly, data.gdf_pand)
             garden_size = utils.calc_areas(gdf_weg_in_plot, new_poly, house, storage_size)
 
@@ -181,28 +211,13 @@ def open_plot(
             )
 
         print(f"Tuin opp = {garden_size:.1f}m², Berging opp = {storage_size:.1f}m²")
-
-        # TODO: Check if we need this or visaluse function works
-        ax = gdf_plot.plot(color='blue', edgecolor='black')
-        gdf_bag_in_plot.plot(ax=ax, color='red', edgecolor='black')
-        house.plot(ax=ax, color='yellow', edgecolor='black')
-        gdf_weg_in_plot.plot(ax=ax, color="green")
-        #put new poly in gpd so we can visualise it
-        new_poly_gdf = gpd.GeoDataFrame(geometry=[new_poly], crs=gdf_plot.crs)
-
-        new_poly_gdf.plot(ax=ax, color="orange", edgecolor='black')
-        gdf_pand_within = data.gdf_pand[data.gdf_pand.geometry.within(plot_poly)]
-        gdf_pand_within.plot(ax=ax, color="pink")
-
-        fig = ax.get_figure()
-        plt.show()
-
+        
         results.append(
             HouseResult(
                 pand_id=row["identificatie"],
-                storage=storage_size,
-                nieuw_tuin_opp=garden_size,
-                classificatie="open_with_two_neighbours",
+                storage_size=storage_size,
+                garden_size=garden_size,
+                classification="open_with_two_neighbours",
             )
         )
 

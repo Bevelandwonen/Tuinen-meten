@@ -172,35 +172,34 @@ def _get_inner_corner_plot(
     Then these are extended until they intersect the plot boundary. 
     The resulting lines are used to create a polygon."""
     
-    try:
-        # Find parallel wall
-        parallel_lines = _find_parallel_edge(house, border_line)
-        furthest_line = _find_furthest_line(parallel_lines, border_line)
+    # Find parallel wall
+    parallel_lines = _find_parallel_edge(house, border_line)
+    furthest_line = _find_furthest_line(parallel_lines, border_line)
 
-        if not furthest_line:
-            return None
-
-        # Create second border
-        wall_coords = list(furthest_line.coords)
-        wall_line = LineString(wall_coords)
-        second_border = _create_plot_border(wall_line, plot)[0]
-        
-        line1_coords = list(border_line.coords)
-        line2_coords = list(second_border.coords)
-
-        corners = [
-            line1_coords[0],
-            line1_coords[1],
-            line2_coords[1],
-            line2_coords[0]
-        ]
-        return Polygon(corners)
-        
-    except Exception as e:
-        print(f"Error handling inner corner: {e}")
+    if not furthest_line:
         return None
 
-def _create_plot_border(shared_walls: Dict, plot: Polygon) -> LineString:
+    # Create second border
+    #wall_coords = list(furthest_line.coords)
+    #wall_line = LineString(wall_coords)
+    second_border = _create_plot_border(furthest_line, plot)
+    
+    line1_coords = list(border_line.coords)
+    line2_coords = list(second_border.coords)
+
+    corners = [
+        line1_coords[0],
+        line1_coords[1],
+        line2_coords[1],
+        line2_coords[0]
+    ]
+    return Polygon(corners)
+        
+    #except Exception as e:
+      #  print(f"Error handling inner corner: {e}")
+      #  return None
+
+def _create_plot_border(shared_walls: LineString, plot: Polygon) -> LineString:
     """Creates an extended border line from a shared wall with a neighbor.
     
     Args:
@@ -211,7 +210,7 @@ def _create_plot_border(shared_walls: Dict, plot: Polygon) -> LineString:
         LineString: The extended border line that intersects with the plot boundary
     """
 
-    shared_walls = LineString(list(shared_walls.values())[0])
+    #shared_walls = LineString(list(shared_walls.values())[0])
 
     extended_line = utils.extend_line_through_polygon(shared_walls, plot)
     intersection = extended_line.intersection(plot)
@@ -410,6 +409,8 @@ def multiple_aligned(
 
         if neighbour_count == 1:
             outer_corner = _is_outer_corner_house(gdf_bag_in_plot, house)
+            # get value from dictionary neighbours, make sure we have a linestring to give to create plot
+            neighbours = LineString(list(neighbours.values())[0])
             border_line = _create_plot_border(neighbours, plot_poly)
 
             if outer_corner:
@@ -418,12 +419,14 @@ def multiple_aligned(
                     house,
                     plot_poly
                 )
+                print("outer corner")
             else:                    
                 new_poly = _get_inner_corner_plot(
                     house, 
                     border_line, 
                     plot_poly
                 )
+                print("inner corner")
 
         else:
             #not a corner house
@@ -431,6 +434,11 @@ def multiple_aligned(
                 neighbours, 
                 plot_poly
             )
+            print("other")
+
+        print(": newww poly")
+        print(new_poly)
+
 
         storage, storage_size = utils.find_berging(
             new_poly, 

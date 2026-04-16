@@ -44,3 +44,8 @@ Draw all results?
 
 
 add information about the different data types and files we load
+
+
+Improvements:
+open: Better detection if the plot is valid
+multiple_aligned: Dealing with inner corners, and dealing with house with "weird" shapes
