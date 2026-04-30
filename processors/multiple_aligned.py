@@ -4,8 +4,10 @@ from typing import Dict, List, Optional, Iterable
 import geopandas as gpd
 import numpy as np
 from shapely.geometry import LineString, Point, Polygon, MultiPolygon
+from shapely.prepared import prep
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import split, snap, nearest_points
+from shapely.validation import explain_validity
 
 from . import utils
 from datatypes import DataBundle, HouseResult
@@ -293,6 +295,27 @@ def _get_corner_house_plot(
     
     return split_polygons[0] if overlaps[0] > overlaps[1] else split_polygons[1]
 
+def lines_intersect_inside_plot(
+    line1: LineString, 
+    line2: LineString, 
+    plot, 
+    tol=1e-6
+) -> bool:
+
+    inter = line1.intersection(line2)
+    if inter.is_empty:
+        return False
+
+    # intersection can be point or line (collinear overlap)
+    # We treat overlap as "bad" too (constraints not usable)
+    if inter.geom_type in ("LineString", "MultiLineString"):
+        return True
+
+    # Point case
+    # Use a tiny buffer so "touching boundary" doesn't over-trigger due to precision
+    inter_geom = inter.buffer(tol)
+    return plot.contains(inter_geom)  # inside (not just touching boundary)
+
 def create_plot(
     shared_walls: Dict, 
     plot: Polygon
@@ -306,12 +329,10 @@ def create_plot(
         plot_poly (Polygon): _description_
 
     Returns:
-        tuple: _description_
     """
 
     plot_lines = []
 
-    # Extend current lines.
     for _, values in shared_walls.items():
         start, end = values[0], values[1]
 
@@ -334,24 +355,39 @@ def create_plot(
             # add points from the lines to new_plot
             plot_lines.append(list(intersection.coords))
 
-
-    if len(plot_lines) < 2:
-        raise RuntimeError("Expected at least 2 plot border intersections")
-
+    line_intersect = lines_intersect_inside_plot(
+        LineString(plot_lines[0]),
+        LineString(plot_lines[1]),
+        plot
+    )
+    if line_intersect or len(plot_lines) < 2:
+       # Maybe use a enum/object for result
+       return None
+     
     # Use the distance between the point to make sure we put them in the right order.
     # To create a polygon
     distance_a = sum((a - b) ** 2 for a, b in zip(plot_lines[0][0], plot_lines[1][0])) ** 0.5
     distance_b = sum((a - b) ** 2 for a, b in zip(plot_lines[0][1], plot_lines[1][0])) ** 0.5
     if distance_a > distance_b:
+        print("yas")
         combined_coord = plot_lines[0] + plot_lines[1]
     else:
+        print("yas22")
         combined_coord = plot_lines[0] + plot_lines[1][::-1]
 
     if combined_coord[0] != combined_coord[-1]:
+        print("yas 344")
         # Make sure loop is closed
         combined_coord.append(combined_coord[0])
 
     new_house_plot = Polygon(combined_coord)
+
+
+    if not new_house_plot.is_valid:
+        print(explain_validity(new_house_plot))
+
+    # show plot and new_house_plot for debugging without using visualise function
+   
     return new_house_plot
 
 def multiple_aligned(
@@ -383,13 +419,36 @@ def multiple_aligned(
         garden size, and classification for each processed house.
     """
     results = []
+    if "0718100000003285" in gdf_bag_in_plot["identificatie"].values:
+        print("found the house")
+        #plot plot_poly, gdf_bag_in_plot and gdf_road_in_plot
+        import matplotlib.pyplot as plt
+        ax = plt.subplot(111)
+        print(plot_poly)
+        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
+        #gpd.GeoSeries(gdf_bag_in_plot.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
+        #gpd.GeoSeries(gdf_road_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
+        plt.show()
 
     for _, row in gdf_bag_in_plot.iterrows():
+        print(row["identificatie"])
+        if row["identificatie"] != "0718100000003285":
+            continue
+
         neighbours = utils.find_borders(gdf_bag_in_plot, row)
 
         house = gdf_bag_in_plot[
             gdf_bag_in_plot["identificatie"] == row["identificatie"]
         ]
+
+        #plot plot_poly, house and gdf_road_in_plot
+        import matplotlib.pyplot as plt
+        ax = plt.subplot(111)
+        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
+        gpd.GeoSeries(house.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
+        gpd.GeoSeries(gdf_road_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
+        plt.show()
+
 
         neighbour_count = len(neighbours)
 
@@ -435,10 +494,17 @@ def multiple_aligned(
                 plot_poly
             )
             print("other")
-
-        print(": newww poly")
-        print(new_poly)
-
+            if new_poly is None:
+                # maybe create a function for this?
+                results.append(
+                    HouseResult(
+                        pand_id=row["identificatie"],
+                        storage_size=0,
+                        garden_size=0,
+                        classification="multiple_aligned_error_plot_creation_failed",
+                    )
+                )
+                continue
 
         storage, storage_size = utils.find_berging(
             new_poly, 

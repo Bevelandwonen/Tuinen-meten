@@ -136,6 +136,14 @@ def _create_plot_open(
 
     if combined_coords[0] != combined_coords[-1]:
         combined_coords.append(combined_coords[0])
+
+    #plot the plot and the polygon(combined_coords)
+    ax = plt.subplot(111)
+    gpd.GeoSeries(plot).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
+    gpd.GeoSeries(LineString(combined_coords)).plot(ax=ax, color='orange', linewidth=2, zorder=2)
+    plt.show()
+
+
     return Polygon(combined_coords)
 
 def open_plot(
@@ -156,6 +164,15 @@ def open_plot(
             gdf_bag_in_plot["identificatie"] == row["identificatie"]
         ]
         print("dit is 1 woning", row["identificatie"])
+        if row["identificatie"] != "0718100000000981":
+            continue
+
+        #plot plot_poly, house, neighbours and gdf_weg_in_plot
+        ax = plt.subplot(111)
+        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
+        gpd.GeoSeries(house.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
+        gpd.GeoSeries(gdf_weg_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
+        plt.show()
 
         neighbour_count = len(neighbours)
 

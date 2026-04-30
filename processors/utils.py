@@ -21,8 +21,6 @@ def truncate_coordinates(line: LineString) -> LineString:
 
 def extend_line_through_polygon(line: LineString, plot: Polygon) -> LineString:
     """Extend a line through a polygon, it always intersect the polygon twice."""
-    print(line)
-    print(type(line))
     start, end = line.coords[0], line.coords[-1]
 
     dx = end[0] - start[0]
@@ -60,8 +58,7 @@ def find_berging(
         
     if storage.empty:
         return gpd.GeoDataFrame(), 0.0
-        
-    # Calculate overlap areas
+
     storage['overlap'] = storage.geometry.apply(
         lambda x: house_plot.intersection(x).area
     )
@@ -162,11 +159,6 @@ def calc_areas(
 
     plot_geom = _fix_geom(plot)
     plot_area = float(plot_geom.area)
-    print(plot_geom)
-    print(plot_area)
-
-
-    plot_geom = _fix_geom(plot)
 
     if not isinstance(plot_geom, (Polygon, MultiPolygon)):
         raise ValueError(

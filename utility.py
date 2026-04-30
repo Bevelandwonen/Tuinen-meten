@@ -74,8 +74,18 @@ def get_bbox_input() -> BoundingBox:
 
 def create_plot_polygon(plot: gpd.geoseries.GeoSeries) -> Polygon:
     """Creates a single polygon from multiple lines in plot"""
+    #print("hoe ziet plot eruit")
+    #print("volgens mij krijgen we alle lijnen, maar toevallig vormen die nu 2 polygons.")
     lines = gpd.GeoSeries([LineString(line.coords) for line in plot])
     polygons = lines.polygonize()
+    # plot the different polygons to check if they are correct
+    print(polygons.shape)
+    print(polygons)
+    #for poly in polygons:
+    #    ax = plt.subplot(111)
+     #   gpd.GeoSeries(poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
+    #    gpd.GeoSeries(lines).plot(ax=ax, color='orange', linewidth=2, zorder=2)
+    #    plt.show()
     big_poly = list(polygons)[0]
     return Polygon(big_poly)
 
@@ -89,8 +99,6 @@ def _safe_make_valid(geom):
     except Exception:
         return None
 
-#TODO: FIX NAMING. REMOVE TOBIAS
-#TODO: Plot id?
 def _build_parcel_polygons_from_lines(
     gdf_kad_lines: gpd.GeoDataFrame,
     plot_nummers: Optional[List[str]] = None,
@@ -107,7 +115,7 @@ def _build_parcel_polygons_from_lines(
     """
     left = gdf_kad_lines[[left_col, "geometry"]].rename(columns={left_col: "Perceelnummer"})
     right = gdf_kad_lines[[right_col, "geometry"]].rename(columns={right_col: "Perceelnummer"})
-
+    
     long = pd.concat([left, right], ignore_index=True)
     long = long.dropna(subset=["Perceelnummer"])
     #only keep the ones containing the filter_num
@@ -120,6 +128,7 @@ def _build_parcel_polygons_from_lines(
     counts = counts.rename(columns={"size": "borders_amount"})
     # Polygonize per plot
     records = []
+    #TODO: improve this code add error catch
     for plot, group in long.groupby("Perceelnummer"):
         try:
             merged = unary_union(list(group.geometry.values))
@@ -138,10 +147,11 @@ def _build_parcel_polygons_from_lines(
 
     if not records:
         return gpd.GeoDataFrame(columns=["Perceelnummer", "borders_amount", "geometry"], geometry="geometry", crs=gdf_kad_lines.crs)
+    #TODO: CHANGE PARCELS TO PLOTS
+    # WE HAVE ALL LINES WITH THE SAME NUMBER and we combine them to a parcel
     parcels = gpd.GeoDataFrame(records, geometry="geometry", crs=gdf_kad_lines.crs)
     parcels = parcels.merge(counts, on="Perceelnummer", how="left")
 
-    # Drop duplicates if any, keep polygon with max area
     parcels = parcels.sort_values("geometry", key=lambda s: s.area if hasattr(s, "area") else s).drop_duplicates("Perceelnummer", keep="last")
     return parcels
 
@@ -165,7 +175,6 @@ def find_plot_id_per_unit(
       - gdf_bag["identificatie"], gdf_bag.geometry (Polygon/MultiPolygon per unit)
       - gdf_kad_lines["perceelLinks"], gdf_kad_lines["perceelRechts"], gdf_kad_lines.geometry (LineString)
     """
-
     # --- CRS sanity: do everything in the same projected CRS (important in NL: EPSG:28992).
     if gdf_kad_lines.crs is None or gdf_bag.crs is None:
         raise ValueError("Both gdf_kad_lines and gdf_bag must have a CRS set.")
@@ -174,7 +183,11 @@ def find_plot_id_per_unit(
 
     # --- Build parcel polygons from lines (ONLY for the plot_nummers you care about)
     parcels = _build_parcel_polygons_from_lines(gdf_kad_lines, plot_nummers)
+
+    #for in parcels, plot the parcel and the lines that make up the parcel
+
     if parcels.empty:
+        print("is parcels empty?")
         # nothing to match; return df unchanged
         if out_file:
             df_units.to_parquet(out_file, index=False)
@@ -188,14 +201,19 @@ def find_plot_id_per_unit(
     bag = bag.set_geometry("geometry")
     # --- Spatial join: which parcel contains each BAG centroid?
     # Result has columns: ['identificatie', 'geometry', 'index_right']
+    # We have all parcels as rows and then we check which bag lies in which parcel.
+    # is that actually what happens?
     matches = gpd.sjoin(bag, parcels[["geometry"]], how="inner", predicate="within")
-    print("amount of matches found:", len(matches))
+    #TODO: Border amount doesnt guarantee anything. Should use area for smallest plot
+    #TODO: then i should check if all houses fall in that small plot
     # Rename 'index_right' to 'plotnummer' (since parcels index IS the plotnummer)
     matches = matches.rename(columns={"index_right": "Perceelnummer"})
     # Attach borders_amount from parcels (indexed by plotnummer)
     matches = matches.join(parcels[["borders_amount"]], on="Perceelnummer")
     # In case a centroid falls within multiple parcels (overlaps), keep smallest borders_amount
     # if part of pand falls outside of parcel lines, use the bigger one
+    #plot all parcel polygons and all bag geometry
+
     best = (
         matches.sort_values("borders_amount", kind="stable")
                .drop_duplicates(subset="identificatie", keep="first")
@@ -204,9 +222,21 @@ def find_plot_id_per_unit(
 
     best_idx = best.set_index("identificatie")
 
-    out = df_units.join(
-        best_idx[["Perceelnummer", "borders_amount"]],
-        on="Pand Id"
+    cols = ["Perceelnummer", "borders_amount"]
+
+    out = df_units.merge(
+        best_idx[cols],
+        how="left",
+        left_on="Pand Id",
+        right_index=True,
+        suffixes=("", "_new"),
     )
+
+    # Fill only where missing (NaN) in the original
+    for c in cols:
+        out[c] = out[c].fillna(out[f"{c}_new"])
+
+    # Optional: drop helper columns
+    out = out.drop(columns=[f"{c}_new" for c in cols])
 
     return out
