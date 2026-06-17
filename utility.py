@@ -1,10 +1,12 @@
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import geopandas as gpd
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
 from shapely.geometry import LineString, Polygon
 from shapely.geometry import box as BoundingBox
 from shapely.ops import polygonize, unary_union
@@ -13,6 +15,56 @@ from shapely.validation import make_valid
 from datatypes import Config, DataBundle
 
 warnings.filterwarnings("ignore")
+
+from enum import Enum
+
+class PlotType(Enum):
+    SINGLE = "single"
+    MULTIPLE_ALIGNED = "multiple_aligned"
+    OPEN = "open"
+
+
+def check_plot_type(
+    df_plot_eenheden: pd.DataFrame, 
+    gdf_bag_temp: gpd.GeoDataFrame
+) -> PlotType:
+    
+    if df_plot_eenheden.shape[0] == 1:
+        return PlotType.SINGLE
+    #TODO: clean check_houses function. does it need the line as output
+    elif check_houses_aligned(gdf_bag_temp)[0]:
+        return PlotType.MULTIPLE_ALIGNED
+    else:
+        return PlotType.OPEN
+
+def check_houses_aligned(
+    gdf: gpd.GeoDataFrame, 
+    line_length: int = 300
+) -> Tuple[bool, Optional[LineString]]:
+    """Check if all houses are in one line. Draw a straight line from a house. 
+       Extend the line and check if it intersects all houses.
+
+    Args:
+        gdf (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    # Extract the coordinates of the middle point of the house geometries
+    p1 = [geom.centroid.coords[0] for geom in gdf.geometry][0]
+    
+    # Check for each point and angle
+    for angle in np.linspace(0, 2 * np.pi, 360):
+        extended_line = LineString([
+                (p1[0] - np.cos(angle) * line_length, p1[1] - np.sin(angle) * line_length),
+                (p1[0] + np.cos(angle) * line_length, p1[1] + np.sin(angle) * line_length)
+            ])
+
+        if all(extended_line.intersects(house) for house in gdf.geometry):
+            return True, extended_line
+    
+    return False, None
 
 #TODO: adjust all naming conventions
 def _check(path: str, name: str) -> str:
@@ -57,7 +109,6 @@ def load_data(
     )
 
 def get_bbox_input() -> BoundingBox:
-    """Get bounding box coordinates from user input"""
     print("\nEnter bounding box coordinates:")
     while True:
         try:
@@ -74,18 +125,12 @@ def get_bbox_input() -> BoundingBox:
 
 def create_plot_polygon(plot: gpd.geoseries.GeoSeries) -> Polygon:
     """Creates a single polygon from multiple lines in plot"""
-    #print("hoe ziet plot eruit")
-    #print("volgens mij krijgen we alle lijnen, maar toevallig vormen die nu 2 polygons.")
     lines = gpd.GeoSeries([LineString(line.coords) for line in plot])
     polygons = lines.polygonize()
     # plot the different polygons to check if they are correct
-    print(polygons.shape)
-    print(polygons)
-    #for poly in polygons:
-    #    ax = plt.subplot(111)
-     #   gpd.GeoSeries(poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
-    #    gpd.GeoSeries(lines).plot(ax=ax, color='orange', linewidth=2, zorder=2)
-    #    plt.show()
+    
+    if polygons.shape[0] > 1:
+        polygons = sorted(polygons, key=lambda p: p.area if hasattr(p, "area") else 0, reverse=True)
     big_poly = list(polygons)[0]
     return Polygon(big_poly)
 
@@ -94,8 +139,6 @@ def _safe_make_valid(geom):
         return None
     try:
         return make_valid(geom)
-        #fixed = geom.buffer(0)
-        #return fixed if not fixed.is_empty else None
     except Exception:
         return None
 
@@ -146,7 +189,13 @@ def _build_parcel_polygons_from_lines(
             continue
 
     if not records:
-        return gpd.GeoDataFrame(columns=["Perceelnummer", "borders_amount", "geometry"], geometry="geometry", crs=gdf_kad_lines.crs)
+        return gpd.GeoDataFrame(columns=["Perceelnummer",
+                                         "borders_amount", 
+                                         "geometry"], 
+                                         geometry="geometry", 
+                                         crs=gdf_kad_lines.crs
+                                )
+    
     #TODO: CHANGE PARCELS TO PLOTS
     # WE HAVE ALL LINES WITH THE SAME NUMBER and we combine them to a parcel
     parcels = gpd.GeoDataFrame(records, geometry="geometry", crs=gdf_kad_lines.crs)

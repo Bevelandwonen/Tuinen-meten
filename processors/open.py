@@ -64,16 +64,6 @@ def _first_intersection(
         inter = ray.intersection(geom)
         if not inter.is_empty:
             points = extract_points(inter)
-            """
-            print(points)
-            fig, ax = plt.subplots(figsize=(8, 8))
-            gpd.GeoSeries(road_union).plot(ax=ax, color='green', linewidth=1, zorder=1)
-            gpd.GeoSeries(plot_boundary).plot(ax=ax, color='blue', linewidth=1, zorder=1)
-            gpd.GeoSeries(ray).plot(ax=ax, color='orange', linewidth=2, zorder=2)
-            if points:
-                    gpd.GeoSeries(points).plot(ax=ax, color='red', markersize=50, zorder=3)
-            plt.show()
-            """
 
             for p in points:
                 dist = origin.distance(p)
@@ -123,7 +113,8 @@ def _create_plot_open(
             plot_lines.append([(p1.x, p1.y), (p2.x, p2.y)])
 
     if len(plot_lines) < 2:
-        raise ValueError("Not enough intersection points found to create a polygon.")
+        #return empty poly
+        return Polygon()
 
     line1, line2 = plot_lines[0], plot_lines[1]
 
@@ -137,105 +128,178 @@ def _create_plot_open(
     if combined_coords[0] != combined_coords[-1]:
         combined_coords.append(combined_coords[0])
 
-    #plot the plot and the polygon(combined_coords)
-    ax = plt.subplot(111)
-    gpd.GeoSeries(plot).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
-    gpd.GeoSeries(LineString(combined_coords)).plot(ax=ax, color='orange', linewidth=2, zorder=2)
-    plt.show()
-
-
     return Polygon(combined_coords)
 
-def open_plot(
-    data: DataBundle, 
+
+
+import logging
+from typing import Final
+
+import geopandas as gpd
+from shapely.geometry import Polygon
+
+logger = logging.getLogger(__name__)
+
+CLASS_INVALID_NEIGHBOUR_COUNT: Final[str] = "open_invalid_neighbour_count"
+CLASS_ONE_NEIGHBOUR: Final[str] = "open_one_neighbour"
+CLASS_TWO_NEIGHBOURS: Final[str] = "open_with_two_neighbours"
+
+def _build_result(
+    pand_id: str,
+    classification: str,
+    storage_size: float | None = None,
+    garden_size: float | None = None,
+    error: str | None = None,
+) -> HouseResult:
+    return HouseResult(
+        pand_id=pand_id,
+        storage_size=storage_size,
+        garden_size=garden_size,
+        classification=classification,
+        error=error,
+    )
+
+def _validate_neighbour_count(pand_id: str, neighbour_count: int) -> HouseResult | None:
+    """
+    Validate neighbour count for an open plot.
+
+    Returns:
+        A failure HouseResult if processing should stop for this house,
+        otherwise None.
+    """
+    if neighbour_count not in (1, 2):
+        return _build_result(
+            pand_id=pand_id,
+            classification=CLASS_INVALID_NEIGHBOUR_COUNT,
+            error=f"Expected 1 or 2 neighbours, found {neighbour_count}",
+        )
+
+    if neighbour_count == 1:
+        return _build_result(
+            pand_id=pand_id,
+            classification=CLASS_ONE_NEIGHBOUR,
+            error="Only one neighbour found; cannot determine plot shape",
+        )
+
+    return None
+
+#TODO: reuse and move to utils?
+def _is_valid_polygon(poly: Polygon) -> bool:
+    return poly.is_valid and poly.area > 0
+
+def _process_open_house(
+    pand_id: str,
+    house_gdf: gpd.GeoDataFrame,
+    neighbours: Dict,
     plot_poly: Polygon,
-    gdf_bag_in_plot: gpd.GeoDataFrame, 
+    gdf_weg_in_plot: gpd.GeoDataFrame,
+    gdf_plot: gpd.GeoDataFrame,
+    gdf_bag_in_plot: gpd.GeoDataFrame,
+    data: DataBundle,
+    visualise: bool,
+) -> HouseResult:
+    """
+    Process a single house in an open plot situation with two neighbours.
+    """
+    new_poly = _create_plot_open(neighbours, plot_poly, gdf_weg_in_plot)
+
+    if not _is_valid_polygon(new_poly):
+        logger.warning(
+            "Invalid plot polygon generated for pand_id=%s (valid=%s, area=%.3f)",
+            pand_id,
+            new_poly.is_valid,
+            new_poly.area,
+        )
+        return _build_result(
+            pand_id=pand_id,
+            classification=CLASS_TWO_NEIGHBOURS,
+            error="Failed to create a valid plot polygon",
+        )
+
+    storage, storage_size = utils.find_berging(new_poly, data.gdf_pand)
+    garden_size = utils.calc_areas(
+        gdf_weg_in_plot,
+        new_poly,
+        house_gdf,
+        storage_size,
+    )
+
+    if visualise:
+        utils.visualise_house_plot(
+            gdf_plot,
+            new_poly,
+            gdf_bag_in_plot,
+            gdf_weg_in_plot,
+            storage,
+        )
+
+    logger.info(
+        "Processed pand_id=%s | garden_size=%.1f m² | storage_size=%.1f m²",
+        pand_id,
+        garden_size,
+        storage_size,
+    )
+
+    return _build_result(
+        pand_id=pand_id,
+        classification=CLASS_TWO_NEIGHBOURS,
+        storage_size=storage_size,
+        garden_size=garden_size,
+    )
+
+def open_plot(
+    data: DataBundle,
+    plot_poly: Polygon,
+    gdf_bag_in_plot: gpd.GeoDataFrame,
     gdf_plot: gpd.GeoDataFrame,
     gdf_weg_in_plot: gpd.GeoDataFrame,
-    visualise: bool = False
-) -> List[Dict]:
+    visualise: bool = False,
+) -> list[HouseResult]:
+    """
+    Determine garden and storage sizes for houses in an open plot configuration.
 
-    results = []
-    
-    for _, row in gdf_bag_in_plot.iterrows():
+    For each house in ``gdf_bag_in_plot``:
+    - find neighbouring houses
+    - validate whether the neighbour count supports open-plot processing
+    - derive a plot polygon for valid cases
+    - calculate storage and garden size
+    - optionally visualise the result
+
+    Returns:
+        A list of HouseResult objects, one for each processed house.
+    """
+    results: list[HouseResult] = []
+
+    for idx, row in gdf_bag_in_plot.iterrows():
+        pand_id = row["identificatie"]
+        house_gdf = gdf_bag_in_plot.loc[[idx]]
         neighbours = utils.find_borders(gdf_bag_in_plot, row)
-        #TODO: Check this line
-        house = gdf_bag_in_plot[
-            gdf_bag_in_plot["identificatie"] == row["identificatie"]
-        ]
-        print("dit is 1 woning", row["identificatie"])
-        if row["identificatie"] != "0718100000000981":
+
+        invalid_result = _validate_neighbour_count(pand_id, len(neighbours))
+        if invalid_result is not None:
+            results.append(invalid_result)
             continue
 
-        #plot plot_poly, house, neighbours and gdf_weg_in_plot
-        ax = plt.subplot(111)
-        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
-        gpd.GeoSeries(house.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
-        gpd.GeoSeries(gdf_weg_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
-        plt.show()
-
-        neighbour_count = len(neighbours)
-
-        if neighbour_count not in (1, 2):
-
-            results.append(
-                HouseResult(
-                    pand_id=row["identificatie"],
-                    storage_size=None,
-                    garden_size=None,
-                    classification="open_no_neighbours",
-                    error=f"Expected 1 or 2 neighbours, found {neighbour_count}"
-                )
+        try:
+            result = _process_open_house(
+                pand_id=pand_id,
+                house_gdf=house_gdf,
+                neighbours=neighbours,
+                plot_poly=plot_poly,
+                gdf_weg_in_plot=gdf_weg_in_plot,
+                gdf_plot=gdf_plot,
+                gdf_bag_in_plot=gdf_bag_in_plot,
+                data=data,
+                visualise=visualise,
             )
-            continue
-            
-        if neighbour_count == 1:
-            results.append(
-                HouseResult(
-                    pand_id=row["identificatie"],
-                    storage_size=None,
-                    garden_size=None,
-                    classification="open_one_neighbour",
-                    error="Only one neighbour found, cannot determine plot shape"
-                )
-            )
-            continue
-        
-        else:
-            try:
-                new_poly = _create_plot_open(neighbours, plot_poly, gdf_weg_in_plot)
-            except Exception as e:
-                results.append(
-                    HouseResult(
-                        pand_id=row["identificatie"],
-                        storage_size=None,
-                        garden_size=None,
-                        classification="open_with_two_neighbours",
-                        error=f"Failed to create plot polygon: {e}"
-                    )
-                )
-                continue
-            storage, storage_size = utils.find_berging(new_poly, data.gdf_pand)
-            garden_size = utils.calc_areas(gdf_weg_in_plot, new_poly, house, storage_size)
-
-        if visualise:
-            utils.visualise_house_plot(
-                gdf_plot, 
-                new_poly, 
-                gdf_bag_in_plot, 
-                gdf_weg_in_plot, 
-                storage,
+        except Exception:
+            logger.exception("Unexpected error while processing pand_id=%s", pand_id)
+            result = _build_result(
+                pand_id=pand_id,
+                classification=CLASS_TWO_NEIGHBOURS,
+                error="Unexpected error while processing plot",
             )
 
-        print(f"Tuin opp = {garden_size:.1f}m², Berging opp = {storage_size:.1f}m²")
-        
-        results.append(
-            HouseResult(
-                pand_id=row["identificatie"],
-                storage_size=storage_size,
-                garden_size=garden_size,
-                classification="open_with_two_neighbours",
-            )
-        )
+        results.append(result)
 
     return results

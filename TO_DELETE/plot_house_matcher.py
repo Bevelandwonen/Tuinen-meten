@@ -34,29 +34,6 @@ def _safe_make_valid(geom):
     except Exception:
         return None
 
-
-def plot_all_parcels(parcels: gpd.GeoDataFrame, figsize=(10, 10)):
-    """
-    Plot all parcels with different colors.
-    """
-    # Create a color map
-    n = len(parcels)
-    colors = cm.get_cmap("tab20", n)  # tab20 has up to 20 distinct colors, repeated if more parcels
-    parcel_colors = [colors(i % 20) for i in range(n)]
-
-    # Plot
-    fig, ax = plt.subplots(figsize=figsize)
-    parcels.plot(
-        ax=ax,
-        color=parcel_colors,
-        edgecolor="black",
-        linewidth=0.8
-    )
-
-    ax.set_title("All Parcels")
-    ax.set_axis_off()
-    plt.show()
-
 def _build_parcel_polygons_from_lines(
     gdf_kad_lines: gpd.GeoDataFrame,
     plot_nummers: Optional[List[str]] = None,
@@ -123,7 +100,6 @@ def find_plot_nummer_per_eenheid(
     out_file: Optional[str] = None,
 ) -> pd.DataFrame:
     """
-    Fast version:
       1) build parcel polygons per plot from boundary lines,
       2) point-in-polygon join of BAG centroids to parcels,
       3) pick smallest borders_amount per BAG unit,
@@ -135,13 +111,11 @@ def find_plot_nummer_per_eenheid(
       - gdf_kad_lines["perceelLinks"], gdf_kad_lines["perceelRechts"], gdf_kad_lines.geometry (LineString)
     """
 
-    # --- CRS sanity: do everything in the same projected CRS (important in NL: EPSG:28992).
     if gdf_kad_lines.crs is None or gdf_bag.crs is None:
         raise ValueError("Both gdf_kad_lines and gdf_bag must have a CRS set.")
     if gdf_kad_lines.crs != gdf_bag.crs:
         gdf_bag = gdf_bag.to_crs(gdf_kad_lines.crs)
 
-    # --- Build parcel polygons from lines (ONLY for the plot_nummers you care about)
     parcels = _build_parcel_polygons_from_lines(gdf_kad_lines, plot_nummers)
     if parcels.empty:
         # nothing to match; return df unchanged
@@ -159,7 +133,6 @@ def find_plot_nummer_per_eenheid(
     # Result has columns: ['identificatie', 'geometry', 'index_right']
     matches = gpd.sjoin(bag, parcels[["geometry"]], how="inner", predicate="within")
     print("amount of matches found:", len(matches))
-    # Rename 'index_right' to 'plotnummer' (since parcels index IS the plotnummer)
     matches = matches.rename(columns={"index_right": "Perceelnummer"})
     # Attach borders_amount from parcels (indexed by plotnummer)
     matches = matches.join(parcels[["borders_amount"]], on="Perceelnummer")
@@ -171,7 +144,6 @@ def find_plot_nummer_per_eenheid(
                .loc[:, ["identificatie", "Perceelnummer", "borders_amount"]]
     )
 
-    # --- Merge back to Tobias
     out = df_tobias.merge(
         best, left_on="Pand ID", right_on="identificatie", how="left"
     ).drop(columns=["identificatie"])
@@ -196,7 +168,6 @@ def main():
     print("Processing full dataset...")
 
     gdf_bag, gdf_kad, df_tobias, _, _, _, _, loc_bag, loc_kad = load_data(config, bbox)
-    # Get unique plot numbers
 
     plot_nummers = list(set(gdf_kad["perceelLinks"].tolist() + gdf_kad["perceelRechts"].tolist()))
     print(f"Processing {len(plot_nummers)} plot numbers")
@@ -215,7 +186,4 @@ def main():
     print(f"Results saved to {output_file}")
 
 if __name__ == "__main__":
-    tic = time.perf_counter()
     main()
-    toc = time.perf_counter()
-    print(f"Script finished in {toc - tic:0.4f} seconds")

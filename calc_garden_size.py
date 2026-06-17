@@ -7,7 +7,8 @@ import utility
 from processors.open import open_plot
 from processors.multiple_aligned import multiple_aligned
 from processors.single import single_house
-from processors.utils import check_plot_type
+from utility import check_plot_type
+from utility import PlotType
 import os
 warnings.filterwarnings('ignore')
 
@@ -48,16 +49,14 @@ if __name__ == "__main__":
                 .tolist()
             )
             print(f"Found {len(plot_id)} new plot numbers to process")
-        #print(plot_id)
-        #plot_id = [4280515670000, 4280606570000]
-        # and perceel: 4280606570000
+        
         df_units_plot_matches = utility.find_plot_id_per_unit(data.df_units, 
                                                                        data.gdf_kad, 
                                                                        data.gdf_bag, 
                                                                        plot_id)
 
         data.df_units = df_units_plot_matches   
-        data.df_units.to_excel(r"data/bag_ids/bag_ids.xlsx", index=False)
+        data.df_units.to_excel(r"data/bag_ids/bag_ids_juiced.xlsx", index=False)
         
     ################################# Begin met berekenen tuinoppervlakte #################################
 
@@ -67,10 +66,11 @@ if __name__ == "__main__":
     # we do this to filter out flats etc.
 
     all_results = []
+    errors = []
 
     # we gaan elk plot langs
     for plotnumber in df_units_filtered["Perceelnummer"].unique():
-        print("weee")
+        print(f"Processing plot {plotnumber}")
         #de eenheden in het plot
         df_units_in_plot = df_units_filtered[df_units_filtered["Perceelnummer"] == plotnumber]
         # verzameling van de lijnen van het plot
@@ -84,35 +84,41 @@ if __name__ == "__main__":
         #why dont we just give one  geometry?
         #this because we can have multiple plots with the same number so we need to check again
 
+        #TODO: ugly code: maybe check validity of polygon if it failt continue
         try:
             plot_poly = utility.create_plot_polygon(gdf_plot["geometry"])
         except Exception as e:
             print(f"Failed to create polygon for plot {plotnumber}: {e}")
+            errors.append((plotnumber, str(e)))
             continue
-        
+            
         # we do this so we can check create_plot_polygon is working correctly, if not we can check the error message
-        continue
-
+        #TODO: Make this return an ENUM
         parcel_type = check_plot_type(df_units_in_plot, gdf_bag_in_plot)
         #TODO: Catch results
-        print(gdf_bag_in_plot)
-        if parcel_type == "single":
+        if parcel_type == PlotType.SINGLE:
             result = single_house(data, plot_poly, gdf_bag_in_plot, gdf_road_in_plot)
-        elif parcel_type == "multiple_aligned":
-            print("multiple aligned")
+        elif parcel_type == PlotType.MULTIPLE_ALIGNED:
             result = multiple_aligned(data, plot_poly, gdf_bag_in_plot, gdf_plot, gdf_road_in_plot)
+        # TODO: USE ENUM HERE
         else:
-            print("open")
             result = open_plot(data, plot_poly, gdf_bag_in_plot, gdf_plot, gdf_road_in_plot)
 
         all_results.extend(result)
     
     # concatenate the results with data.df_units based on pand_id
     df_results = pd.DataFrame([r.__dict__ for r in all_results])
-    print(df_results.head())
+    df_results.rename(columns={"pand_id": "Pand Id"}, inplace=True)
     df_eenheid_nieuw = pd.merge(data.df_units, df_results, left_on="Pand Id", right_on="Pand Id", how="left")
     # For every row with a non unique pand_id set classification to "non unique pand_id, prob flat"
+    #TODO: clenaup this ugly code
+    for plotnumber, error in errors:
+        df_eenheid_nieuw.loc[df_eenheid_nieuw["Perceelnummer"] == plotnumber, "class"] = f"error in plot polygon creation: {error}"
+
     df_eenheid_nieuw.loc[data.df_units["Pand Id"].duplicated(keep=False), "class"] = "non unique pand_id, prob flat"
     
-    
+
+    #TODO: ADD OUTLIER CHECK PER PARCEL
+
+
     df_eenheid_nieuw.to_excel("garden_size_nieuw_eerste_run.xlsx")

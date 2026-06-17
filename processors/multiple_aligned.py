@@ -1,5 +1,5 @@
 import math
-from typing import Dict, List, Optional, Iterable
+from typing import Dict, List, Optional, Iterable, Mapping, Sequence, Any
 
 import geopandas as gpd
 import numpy as np
@@ -9,14 +9,17 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import split, snap, nearest_points
 from shapely.validation import explain_validity
 
+import geopandas as gpd
+from shapely.geometry import LineString, Polygon
+
 from . import utils
 from datatypes import DataBundle, HouseResult
-#TODO: use this import format in all files
+from utility import PlotType
 
 def _find_parallel_edge(
     house: gpd.GeoDataFrame,
     wall_line: LineString,
-    angle_tolerance_degrees: float = 5.0,
+    angle_tolerance_degrees: float = 10.0,
     min_segment_length: float = 0.25,
 ) -> List[LineString]:
     """
@@ -100,39 +103,10 @@ def _find_parallel_edge(
             seg_unit = np.array([dx / seg_len, dy / seg_len], dtype=float)
 
             sin_theta = abs(ref_unit[0] * seg_unit[1] - ref_unit[1] * seg_unit[0])
-
             if sin_theta <= sin_threshold:
                 parallel_edges.append(seg)
 
     return parallel_edges
-
-#TODO: remove
-def _find_outer_wall(
-    parallel_house_lines: List[LineString], 
-    plot_border: LineString
-) -> Optional[LineString]:
-    """
-    Finds the line from parallel_house_lines that has the greatest distance to plot_border.
-    
-    Args:
-        parallel_house_lines (List[Line]): A list of parallel lines representing house walls.
-        plot_border (LineString): A line representing the property border.
-    
-    Returns:
-        Optional[Line]: The line with the greatest distance, or None if input is empty.
-    """
-    furthest_line = None
-    max_distance = 0.0
-
-    for line in parallel_house_lines:
-        p1, p2 = nearest_points(plot_border, line)
-        distance = math.hypot(p2.x - p1.x, p2.y - p1.y)
-        
-        if distance > max_distance:
-            max_distance = distance
-            furthest_line = line
-
-    return furthest_line
 
 def _find_furthest_line(
     candidate_lines: Iterable[LineString],
@@ -173,7 +147,7 @@ def _get_inner_corner_plot(
     """Create a naive plot for an inner corner house by taking the shared wall and a parallel wall. 
     Then these are extended until they intersect the plot boundary. 
     The resulting lines are used to create a polygon."""
-    
+
     # Find parallel wall
     parallel_lines = _find_parallel_edge(house, border_line)
     furthest_line = _find_furthest_line(parallel_lines, border_line)
@@ -181,9 +155,6 @@ def _get_inner_corner_plot(
     if not furthest_line:
         return None
 
-    # Create second border
-    #wall_coords = list(furthest_line.coords)
-    #wall_line = LineString(wall_coords)
     second_border = _create_plot_border(furthest_line, plot)
     
     line1_coords = list(border_line.coords)
@@ -195,13 +166,13 @@ def _get_inner_corner_plot(
         line2_coords[1],
         line2_coords[0]
     ]
+
     return Polygon(corners)
         
-    #except Exception as e:
-      #  print(f"Error handling inner corner: {e}")
-      #  return None
-
-def _create_plot_border(shared_walls: LineString, plot: Polygon) -> LineString:
+def _create_plot_border(
+    shared_walls: LineString,
+    plot: Polygon
+) -> LineString:
     """Creates an extended border line from a shared wall with a neighbor.
     
     Args:
@@ -212,12 +183,11 @@ def _create_plot_border(shared_walls: LineString, plot: Polygon) -> LineString:
         LineString: The extended border line that intersects with the plot boundary
     """
 
-    #shared_walls = LineString(list(shared_walls.values())[0])
-
     extended_line = utils.extend_line_through_polygon(shared_walls, plot)
     intersection = extended_line.intersection(plot)
-
-    return LineString(list(intersection.coords)) if intersection else LineString()
+    if intersection:
+        intersection = utils.extract_line(intersection)
+    return LineString(intersection) if intersection else LineString()
         
 def _is_outer_corner_house(
     houses: gpd.GeoDataFrame, 
@@ -286,14 +256,14 @@ def _get_corner_house_plot(
     split_result = split(plot, cut_line)
     split_polygons = [geom for geom in split_result.geoms if isinstance(geom, Polygon)]
 
-    if len(split_polygons) != 2:
-        raise RuntimeError(f"Expected 2 polygons after split, got {len(split_polygons)}")
-
     # Find polygon with most house overlap
     house_geom = house["geometry"].iloc[0]
     overlaps = [poly.intersection(house_geom).area for poly in split_polygons]
     
-    return split_polygons[0] if overlaps[0] > overlaps[1] else split_polygons[1]
+    #get index of the polygon with the most overlap
+    max_index = overlaps.index(max(overlaps))
+
+    return split_polygons[max_index]
 
 def lines_intersect_inside_plot(
     line1: LineString, 
@@ -316,6 +286,7 @@ def lines_intersect_inside_plot(
     inter_geom = inter.buffer(tol)
     return plot.contains(inter_geom)  # inside (not just touching boundary)
 
+#TODO: Kinda duplicate with create_plot in open plot. Make one function
 def create_plot(
     shared_walls: Dict, 
     plot: Polygon
@@ -332,12 +303,12 @@ def create_plot(
     """
 
     plot_lines = []
+    print(f"Shared walls: {shared_walls}")
 
     for _, values in shared_walls.items():
         start, end = values[0], values[1]
 
         direction = ((end.x - start.x), (end.y - start.y))
-        #length = (direction[0] ** 2 + direction[1] ** 2) **0.2
         length = math.hypot(direction[0], direction[1])
         unit_direction = (direction[0] / length, direction[1] / length)
 
@@ -350,10 +321,12 @@ def create_plot(
 
         new_plot_line = LineString([new_start, new_end])
         intersection = new_plot_line.intersection(plot)
-        
+#Getting this error: NotImplementedError: Sub-geometries may have coordinate sequences, but multi-part geometries do not
+
         if intersection:
+            line = utils.extract_line(intersection)
             # add points from the lines to new_plot
-            plot_lines.append(list(intersection.coords))
+            plot_lines.append(line)
 
     line_intersect = lines_intersect_inside_plot(
         LineString(plot_lines[0]),
@@ -369,26 +342,144 @@ def create_plot(
     distance_a = sum((a - b) ** 2 for a, b in zip(plot_lines[0][0], plot_lines[1][0])) ** 0.5
     distance_b = sum((a - b) ** 2 for a, b in zip(plot_lines[0][1], plot_lines[1][0])) ** 0.5
     if distance_a > distance_b:
-        print("yas")
         combined_coord = plot_lines[0] + plot_lines[1]
     else:
-        print("yas22")
         combined_coord = plot_lines[0] + plot_lines[1][::-1]
 
     if combined_coord[0] != combined_coord[-1]:
-        print("yas 344")
         # Make sure loop is closed
         combined_coord.append(combined_coord[0])
 
     new_house_plot = Polygon(combined_coord)
 
-
     if not new_house_plot.is_valid:
         print(explain_validity(new_house_plot))
-
-    # show plot and new_house_plot for debugging without using visualise function
    
     return new_house_plot
+
+def _validate_neighbour_count(pand_id: str, neighbour_count: int) -> HouseResult | None:
+    """
+    Validate the number of neighbours for a multiple-aligned house.
+
+    Returns:
+        A failure result if the house cannot be processed, otherwise None.
+    """
+    if neighbour_count not in (1, 2):
+        return utils.build_result(
+            pand_id=pand_id,
+            classification= "multiple_aligned_error_invalid_neighbour_count",
+            error=f"Expected 1 or 2 neighbours, found {neighbour_count}",
+        )
+
+    return None
+
+def _create_corner_plot(
+    neighbours: Mapping[Any, Sequence],
+    house_gdf: gpd.GeoDataFrame,
+    gdf_bag_in_plot: gpd.GeoDataFrame,
+    plot_poly: Polygon,
+) -> Polygon | None:
+    """
+    Create a plot polygon for a corner house.
+    """
+    neighbour_points = next(iter(neighbours.values()), None)
+    if not neighbour_points:
+        return None
+
+    neighbour_line = LineString(neighbour_points)
+    border_line = _create_plot_border(neighbour_line, plot_poly)
+
+    if _is_outer_corner_house(gdf_bag_in_plot, house_gdf):
+        return _get_corner_house_plot(
+            border_line=border_line,
+            house=house_gdf,
+            plot_poly=plot_poly,
+        )
+
+    return _get_inner_corner_plot(
+        house=house_gdf,
+        border_line=border_line,
+        plot_poly=plot_poly,
+    )
+
+def _create_aligned_plot(
+    neighbours: Mapping[Any, Sequence],
+    house_gdf: gpd.GeoDataFrame,
+    gdf_bag_in_plot: gpd.GeoDataFrame,
+    plot_poly: Polygon,
+) -> Polygon | None:
+    """
+    Create a plot polygon for a multiple-aligned house.
+
+    - 1 neighbour  -> corner house path
+    - 2 neighbours -> standard aligned house path
+    """
+    neighbour_count = len(neighbours)
+
+    if neighbour_count == 1:
+        return _create_corner_plot(
+            neighbours=neighbours,
+            house_gdf=house_gdf,
+            gdf_bag_in_plot=gdf_bag_in_plot,
+            plot_poly=plot_poly,
+        )
+
+    return create_plot(neighbours, plot_poly)
+
+def _process_multiple_aligned_house(
+    pand_id: str,
+    house_gdf: gpd.GeoDataFrame,
+    neighbours: Mapping[Any, Sequence],
+    gdf_bag_in_plot: gpd.GeoDataFrame,
+    gdf_plot: gpd.GeoDataFrame,
+    gdf_road_in_plot: gpd.GeoDataFrame,
+    plot_poly: Polygon,
+    data: DataBundle,
+    visualise: bool,
+) -> HouseResult:
+    """
+    Process a single house in a multiple-aligned plot configuration.
+    """
+    new_poly = _create_aligned_plot(
+        neighbours=neighbours,
+        house_gdf=house_gdf,
+        gdf_bag_in_plot=gdf_bag_in_plot,
+        plot_poly=plot_poly,
+    )
+
+    if not utils.is_valid_plot_polygon(new_poly):
+        return utils.build_result(
+            pand_id=pand_id,
+            classification="multiple_aligned_error_plot_creation_failed",
+            storage_size=0,
+            garden_size=0,
+            error="Failed to create a valid plot polygon",
+        )
+
+    storage, storage_size = utils.find_berging(new_poly, data.gdf_pand)
+
+    garden_size = utils.calc_areas(
+        gdf_road_in_plot,
+        new_poly,
+        house_gdf,
+        storage_size,
+    )
+
+    if visualise:
+        utils.visualise_house_plot(
+            gdf_plot,
+            new_poly,
+            gdf_bag_in_plot,
+            gdf_road_in_plot,
+            storage,
+        )
+
+    return utils.build_result(
+        pand_id=pand_id,
+        classification=PlotType.MULTIPLE_ALIGNED.value,
+        storage_size=storage_size,
+        garden_size=garden_size,
+    )
 
 def multiple_aligned(
     data: DataBundle,
@@ -396,147 +487,55 @@ def multiple_aligned(
     gdf_bag_in_plot: gpd.GeoDataFrame,
     gdf_plot: gpd.GeoDataFrame,
     gdf_road_in_plot: gpd.GeoDataFrame,
-    visualise: bool = False
-) -> List[Dict]:
-    
+    visualise: bool = False,
+) -> list[HouseResult]:
     """
-    Process a set of aligned houses within a plot to assign garden and storage areas for each house.
+    Process aligned houses within a plot and assign garden and storage areas.
 
-    This function iterates over all houses in the provided GeoDataFrame, determines their neighbors,
-    classifies them as corner or non-corner houses, and computes the corresponding garden and storage
-    areas. Optionally, it can visualize the results for each house.
-
-    Args:
-        data (DataBundle): Data bundle containing relevant GeoDataFrames, including building footprints.
-        plot_poly (Polygon): The complete plot boundary polygon.
-        gdf_bag_in_plot (gpd.GeoDataFrame): GeoDataFrame of houses within the plot.
-        gdf_plot (gpd.GeoDataFrame): GeoDataFrame of the plot itself.
-        gdf_road_in_plot (gpd.GeoDataFrame): GeoDataFrame of roads within the plot.
-        visualise (bool, optional): If True, visualize the house, plot, and storage assignment. Default is False.
+    For each house in ``gdf_bag_in_plot``:
+    - determine neighbouring houses
+    - validate whether the neighbour count is supported
+    - classify corner vs non-corner logic
+    - derive a plot polygon
+    - calculate storage and garden size
+    - optionally visualise the result
 
     Returns:
-        List[Dict]: A list of HouseResult dictionaries, each containing the house ID, storage size,
-        garden size, and classification for each processed house.
+        A list of HouseResult objects, one for each processed house.
     """
-    results = []
-    if "0718100000003285" in gdf_bag_in_plot["identificatie"].values:
-        print("found the house")
-        #plot plot_poly, gdf_bag_in_plot and gdf_road_in_plot
-        import matplotlib.pyplot as plt
-        ax = plt.subplot(111)
-        print(plot_poly)
-        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
-        #gpd.GeoSeries(gdf_bag_in_plot.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
-        #gpd.GeoSeries(gdf_road_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
-        plt.show()
+    results: list[HouseResult] = []
 
-    for _, row in gdf_bag_in_plot.iterrows():
-        print(row["identificatie"])
-        if row["identificatie"] != "0718100000003285":
-            continue
-
+    for idx, row in gdf_bag_in_plot.iterrows():
+        pand_id = row["identificatie"]
+        house_gdf = gdf_bag_in_plot.loc[[idx]]
         neighbours = utils.find_borders(gdf_bag_in_plot, row)
 
-        house = gdf_bag_in_plot[
-            gdf_bag_in_plot["identificatie"] == row["identificatie"]
-        ]
-
-        #plot plot_poly, house and gdf_road_in_plot
-        import matplotlib.pyplot as plt
-        ax = plt.subplot(111)
-        gpd.GeoSeries(plot_poly).boundary.plot(ax=ax, color='blue', linewidth=1, zorder=1)
-        gpd.GeoSeries(house.geometry).plot(ax=ax, color='green', linewidth=1, zorder=2)
-        gpd.GeoSeries(gdf_road_in_plot.geometry).plot(ax=ax, color='grey', linewidth=1, zorder=3)
-        plt.show()
-
-
-        neighbour_count = len(neighbours)
-
-        if neighbour_count not in (1, 2): 
-            # This is possible if the corporation doesnt own the neighbouring houses.
-            #TODO: Fix this by using bag data from other houses aswell and checking if they have the same bag id.
-
-            results.append(
-                HouseResult(
-                    pand_id=row["identificatie"],
-                    storage_size=0,
-                    garden_size=0,
-                    classification="multiple_aligned_error_no_neighbours",
-                )
-            )
+        invalid_result = _validate_neighbour_count(pand_id, len(neighbours))
+        if invalid_result is not None:
+            results.append(invalid_result)
             continue
 
-        if neighbour_count == 1:
-            outer_corner = _is_outer_corner_house(gdf_bag_in_plot, house)
-            # get value from dictionary neighbours, make sure we have a linestring to give to create plot
-            neighbours = LineString(list(neighbours.values())[0])
-            border_line = _create_plot_border(neighbours, plot_poly)
-
-            if outer_corner:
-                new_poly = _get_corner_house_plot(
-                    border_line, 
-                    house,
-                    plot_poly
-                )
-                print("outer corner")
-            else:                    
-                new_poly = _get_inner_corner_plot(
-                    house, 
-                    border_line, 
-                    plot_poly
-                )
-                print("inner corner")
-
-        else:
-            #not a corner house
-            new_poly = create_plot(
-                neighbours, 
-                plot_poly
+        try:
+            result = _process_multiple_aligned_house(
+                pand_id=pand_id,
+                house_gdf=house_gdf,
+                neighbours=neighbours,
+                gdf_bag_in_plot=gdf_bag_in_plot,
+                gdf_plot=gdf_plot,
+                gdf_road_in_plot=gdf_road_in_plot,
+                plot_poly=plot_poly,
+                data=data,
+                visualise=visualise,
             )
-            print("other")
-            if new_poly is None:
-                # maybe create a function for this?
-                results.append(
-                    HouseResult(
-                        pand_id=row["identificatie"],
-                        storage_size=0,
-                        garden_size=0,
-                        classification="multiple_aligned_error_plot_creation_failed",
-                    )
-                )
-                continue
-
-        storage, storage_size = utils.find_berging(
-            new_poly, 
-            data.gdf_pand
-        )
-
-        garden_size = utils.calc_areas(
-            gdf_road_in_plot, 
-            new_poly, 
-            house, 
-            storage_size,
-        )
-
-        if visualise:
-            utils.visualise_house_plot(
-                gdf_plot, 
-                new_poly, 
-                gdf_bag_in_plot, 
-                gdf_road_in_plot, 
-                storage,
+        except Exception as exc:
+            result = utils.build_result(
+                pand_id=pand_id,
+                classification="multiple_aligned_error_unexpected",
+                storage_size=0,
+                garden_size=0,
+                error=f"Unexpected error while processing house: {exc}",
             )
 
-        print(f"Tuin opp = {garden_size:.1f}m², Berging opp = {storage_size:.1f}m²")
+        results.append(result)
 
-        results.append(
-            HouseResult(
-                pand_id=row["identificatie"],
-                storage_size=storage_size,
-                garden_size=garden_size,
-                classification="multiple_aligned",
-            )
-        )
-        
     return results
-

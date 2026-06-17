@@ -5,8 +5,22 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pydash import lines
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry import box as BoundingBox
+
+from datatypes import HouseResult
+
+def extract_line(geom):
+
+    if geom.is_empty:
+        return None
+
+    if geom.geom_type == "LineString":
+        return list(geom.coords)
+
+    elif geom.geom_type == "MultiLineString":
+        return list(geom.geoms[0].coords)
 
 def _generate_lines(points: list) -> list:
     """Create lines between points"""
@@ -66,19 +80,6 @@ def find_berging(
     # Get building with maximum overlap
     max_storage = storage.loc[storage['overlap'].idxmax()]
     return gpd.GeoDataFrame([max_storage]), float(max_storage['overlap'])
-
-def check_plot_type(
-    df_plot_eenheden: pd.DataFrame, 
-    gdf_bag_temp: gpd.GeoDataFrame
-) -> str:
-    
-    if df_plot_eenheden.shape[0] == 1:
-        return "single"
-    #TODO: clean check_houses function. does it need the line as output
-    elif check_houses_aligned(gdf_bag_temp)[0]:
-        return "multiple_aligned"
-    else:
-        return "open"
 
 def visualise_house_plot(
     plot: gpd.GeoDataFrame,
@@ -156,7 +157,6 @@ def calc_areas(
     # If roads are provided, they must have a CRS. If roads is empty/None, that's OK.
     if roads is not None and not roads.empty and roads.crs is None:
         raise ValueError("roads.crs is None")
-
     plot_geom = _fix_geom(plot)
     plot_area = float(plot_geom.area)
 
@@ -200,71 +200,6 @@ def calc_areas(
 
     garden_area = plot_area - road_area - house_area - float(storage_size)
     return max(0.0, garden_area)
-
-def calc_areas2(
-    roads: gpd.GeoDataFrame, 
-    plot: Polygon, 
-    house: gpd.GeoDataFrame, 
-    storage_size: float
-) -> float:
-    """Calculate the garden size by subtracting roads, house and storage from plot.
-    
-    Args:
-        roads: GeoDataFrame containing road geometries
-        plot: Polygon representing the complete plot
-        house: GeoDataFrame containing house geometry
-        storage_size: Size of storage buildings in the plot
-    
-    Returns:
-        float: Calculated garden size in square meters
-        
-    Raises:
-        ValueError: If inputs are invalid or CRS mismatchn
-    """
-
-    plot_gdf = gpd.GeoDataFrame(geometry=[plot], crs=roads.crs)
-
-    # Validate CRS match
-    if roads.crs != plot_gdf.crs:
-        raise ValueError(f"CRS mismatch: roads={roads.crs}, plot={plot_gdf.crs}")
-
-    roads_dissolved = roads.dissolve()
-    intersection = roads_dissolved.intersection(plot_gdf.union_all())
-    road_area = intersection.area.sum()
-    house_area = house.area.values[0]
-
-    garden_size = plot.area - (road_area + house_area + storage_size)
-    return garden_size
-
-def check_houses_aligned(
-    gdf: gpd.GeoDataFrame, 
-    line_length: int = 300
-) -> Tuple[bool, Optional[LineString]]:
-    """Check if all houses are in one line. Draw a straight line from a house. 
-       Extend the line and check if it intersects all houses.
-
-    Args:
-        gdf (_type_): _description_
-
-    Returns:
-        _type_: _description_
-    """
-
-    # Extract the coordinates of the middle point of the house geometries
-    p1 = [geom.centroid.coords[0] for geom in gdf.geometry][0]
-    
-    # Check for each point and angle
-    for angle in np.linspace(0, 2 * np.pi, 360):
-        extended_line = LineString([
-                (p1[0] - np.cos(angle) * line_length, p1[1] - np.sin(angle) * line_length),
-                (p1[0] + np.cos(angle) * line_length, p1[1] + np.sin(angle) * line_length)
-            ])
-
-        if all(extended_line.intersects(house) for house in gdf.geometry):
-            return True, extended_line
-    
-    return False, None
-
 
 def find_borders(
     gdf: gpd.GeoDataFrame, 
@@ -313,3 +248,21 @@ def find_borders(
                         else:
                             neighbours_found[eenheid_neighbour] = [Point(neighbour_wall.coords[0]), Point(neighbour_wall.coords[1])]
     return neighbours_found
+
+def is_valid_plot_polygon(poly: Polygon | None) -> bool:
+    return poly is not None and poly.is_valid and poly.area > 0
+
+def build_result(
+    pand_id: str,
+    classification: str,
+    storage_size: float | None = None,
+    garden_size: float | None = None,
+    error: str | None = None,
+) -> HouseResult:
+    return HouseResult(
+        pand_id=pand_id,
+        storage_size=storage_size,
+        garden_size=garden_size,
+        classification=classification,
+        error=error,
+    )
