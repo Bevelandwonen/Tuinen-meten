@@ -78,6 +78,9 @@ In het geval van een open perceel zonder weg of andere scheidingslijnen kunnen w
 
 Voor lastige of fout geclassificeerde tuinen kan je met het manuel script handmatig de tuingrenzen aangeven.
 
+![Handmatige grenzen](assets/by_hand.png)
+
+
 ## Script uitvoeren
 
 Gebruik de automatische run voor de standaardverwerking. De handmatige run gebruik je voor uitzonderingen of validatie van moeilijke cases.
