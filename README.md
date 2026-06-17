@@ -1,8 +1,8 @@
 # Tuinoppervlakte berekenen op basis van BAG, BGT en Kadaster
 
-Dit project berekent per woning de buitenruimte en berging op basis van openbare data. Eerst koppelen we woningen aan een perceel, daarna passen we een speicifeke  geometrische methode toe om het perceel van de woning te bepalen. Vanuit dat deelperceel bereken we de tuinoppervlakte.
+Dit project berekent per woning de buitenruimte en berging op basis van openbare data. Eerst koppelen we woningen aan een perceel, daarna passen we een specifieke geometrische methode toe om het perceel van de woning te bepalen. Vanuit dat deelperceel berekenen we de tuinoppervlakte.
 
-De aanpak is praktisch en werkt voor een groot deel van de woningen. Deze methode werkt niet voor flats aangezien of etagewoningen aangezien we niet weten welke woning op de beganegrond staat. In het algemeen trekken we vanuit relevante woningmuren lijnen door tot aan perceelgrenzen of openbare ruimte, zodat een logisch perceeldeel per woning ontstaat. De methode is niet perfect in alle uitzonderingssituaties, maar levert voor ongeveer 80% van het bezit een betrouwbaar resultaat.
+De aanpak is praktisch en werkt voor een groot deel van de woningen. Deze methode werkt niet voor flats of etagewoningen, aangezien we niet weten welke woning zich op de begane grond bevindt. In het algemeen trekken we vanuit relevante woningmuren lijnen door tot aan perceelgrenzen of openbare ruimte, zodat per woning een logisch perceeldeel ontstaat. De methode is niet perfect in alle uitzonderingssituaties, maar levert voor ongeveer 80% van het bezit een betrouwbaar resultaat.
 
 ## Benodigde data
 
@@ -79,7 +79,6 @@ In het geval van een open perceel zonder weg of andere scheidingslijnen kunnen w
 Voor lastige of fout geclassificeerde tuinen kan je met het manuel script handmatig de tuingrenzen aangeven.
 
 ![Handmatige grenzen](assets/by_hand.png)
-
 
 ## Script uitvoeren
 
