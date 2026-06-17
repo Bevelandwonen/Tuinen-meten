@@ -57,9 +57,11 @@ Bij woningen in één rij wordt gewerkt met gedeelde muren tussen buren om grenz
 Er zijn twee veelvoorkomende varianten:
 
 1. Rijen met twee hoekwoningen
-2. Rijen met meer dan twee hoekwoningen of complexere hoekgeometrie
 
 ![Multiple aligned met twee hoekwoningen](assets/multiple_two_corner_houses.png)
+
+2. Rijen met meer dan twee hoekwoningen of complexere hoekgeometrie
+
 ![Multiple aligned met meer dan twee hoekwoningen](assets/multiple_more_than_two_corner_houses.png)
 
 ### Open
@@ -69,6 +71,7 @@ In open configuraties worden grenslijnen afgeleid vanuit gedeelde wanden en door
 ![Open configuratie met scheiding](assets/open_with_border.png)
 
 In het geval van een open perceel zonder weg of andere scheidingslijnen kunnen we het tuin oppervlakte niet berekenen.
+
 ![Open configuratie zonder duidelijke scheiding](assets/open_no_border.png)
 
 ## Handmatige correctie
