@@ -23,7 +23,6 @@ class PlotType(Enum):
     MULTIPLE_ALIGNED = "multiple_aligned"
     OPEN = "open"
 
-
 def check_plot_type(
     df_plot_eenheden: pd.DataFrame, 
     gdf_bag_temp: gpd.GeoDataFrame
@@ -31,7 +30,6 @@ def check_plot_type(
     
     if df_plot_eenheden.shape[0] == 1:
         return PlotType.SINGLE
-    #TODO: clean check_houses function. does it need the line as output
     elif check_houses_aligned(gdf_bag_temp)[0]:
         return PlotType.MULTIPLE_ALIGNED
     else:
@@ -66,7 +64,6 @@ def check_houses_aligned(
     
     return False, None
 
-#TODO: adjust all naming conventions
 def _check(path: str, name: str) -> str:
     if not path:
         raise ValueError(f"{name} path is missing")
@@ -127,7 +124,6 @@ def create_plot_polygon(plot: gpd.geoseries.GeoSeries) -> Polygon:
     """Creates a single polygon from multiple lines in plot"""
     lines = gpd.GeoSeries([LineString(line.coords) for line in plot])
     polygons = lines.polygonize()
-    # plot the different polygons to check if they are correct
     
     if polygons.shape[0] > 1:
         polygons = sorted(polygons, key=lambda p: p.area if hasattr(p, "area") else 0, reverse=True)
@@ -224,7 +220,6 @@ def find_plot_id_per_unit(
       - gdf_bag["identificatie"], gdf_bag.geometry (Polygon/MultiPolygon per unit)
       - gdf_kad_lines["perceelLinks"], gdf_kad_lines["perceelRechts"], gdf_kad_lines.geometry (LineString)
     """
-    # --- CRS sanity: do everything in the same projected CRS (important in NL: EPSG:28992).
     if gdf_kad_lines.crs is None or gdf_bag.crs is None:
         raise ValueError("Both gdf_kad_lines and gdf_bag must have a CRS set.")
     if gdf_kad_lines.crs != gdf_bag.crs:
@@ -232,8 +227,6 @@ def find_plot_id_per_unit(
 
     # --- Build parcel polygons from lines (ONLY for the plot_nummers you care about)
     parcels = _build_parcel_polygons_from_lines(gdf_kad_lines, plot_nummers)
-
-    #for in parcels, plot the parcel and the lines that make up the parcel
 
     if parcels.empty:
         print("is parcels empty?")
@@ -248,20 +241,11 @@ def find_plot_id_per_unit(
     bag = gdf_bag[gdf_bag["identificatie"].isin(df_units["Pand Id"])][["identificatie", "geometry"]].copy()
     bag["geometry"] = bag.geometry.centroid  # centroid for point-in-polygon
     bag = bag.set_geometry("geometry")
-    # --- Spatial join: which parcel contains each BAG centroid?
-    # Result has columns: ['identificatie', 'geometry', 'index_right']
-    # We have all parcels as rows and then we check which bag lies in which parcel.
-    # is that actually what happens?
     matches = gpd.sjoin(bag, parcels[["geometry"]], how="inner", predicate="within")
     #TODO: Border amount doesnt guarantee anything. Should use area for smallest plot
     #TODO: then i should check if all houses fall in that small plot
-    # Rename 'index_right' to 'plotnummer' (since parcels index IS the plotnummer)
     matches = matches.rename(columns={"index_right": "Perceelnummer"})
-    # Attach borders_amount from parcels (indexed by plotnummer)
     matches = matches.join(parcels[["borders_amount"]], on="Perceelnummer")
-    # In case a centroid falls within multiple parcels (overlaps), keep smallest borders_amount
-    # if part of pand falls outside of parcel lines, use the bigger one
-    #plot all parcel polygons and all bag geometry
 
     best = (
         matches.sort_values("borders_amount", kind="stable")
@@ -281,11 +265,9 @@ def find_plot_id_per_unit(
         suffixes=("", "_new"),
     )
 
-    # Fill only where missing (NaN) in the original
     for c in cols:
         out[c] = out[c].fillna(out[f"{c}_new"])
 
-    # Optional: drop helper columns
     out = out.drop(columns=[f"{c}_new" for c in cols])
 
     return out

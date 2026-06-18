@@ -80,7 +80,6 @@ def _find_parallel_edge(
     else:
         return parallel_edges
 
-    #TODO: change name to edge because poly should be closing the loop
     for poly in polygons:
         exterior = list(poly.exterior.coords)
         for i in range(len(exterior) - 1):
@@ -276,13 +275,9 @@ def lines_intersect_inside_plot(
     if inter.is_empty:
         return False
 
-    # intersection can be point or line (collinear overlap)
-    # We treat overlap as "bad" too (constraints not usable)
     if inter.geom_type in ("LineString", "MultiLineString"):
         return True
 
-    # Point case
-    # Use a tiny buffer so "touching boundary" doesn't over-trigger due to precision
     inter_geom = inter.buffer(tol)
     return plot.contains(inter_geom)  # inside (not just touching boundary)
 
@@ -321,7 +316,6 @@ def create_plot(
 
         new_plot_line = LineString([new_start, new_end])
         intersection = new_plot_line.intersection(plot)
-#Getting this error: NotImplementedError: Sub-geometries may have coordinate sequences, but multi-part geometries do not
 
         if intersection:
             line = utils.extract_line(intersection)
