@@ -11,6 +11,9 @@ from shapely.geometry import box as BoundingBox
 
 from datatypes import HouseResult
 
+BUFFER_VALUE = 2.0
+OVERLAP_VALUE = 0.0111
+
 def extract_line(geom):
 
     if geom.is_empty:
@@ -64,7 +67,6 @@ def find_berging(
 ) -> Tuple[gpd.GeoDataFrame, float]:
     """Find storage buildings in plot and calculate total area."""
 
-    # Find buildings that overlap with plot
     storage = buildings[
         (buildings.geometry.intersects(house_plot)) & 
         (buildings.geometry.type == 'MultiPolygon')
@@ -90,22 +92,20 @@ def visualise_house_plot(
 ) -> None:
     """Visualize the house, plot, road and storage buildings on a single plot."""
     house_plot = gpd.GeoDataFrame(geometry=[house_plot])
-    #print full linestring house plot
+
     ax = plot.plot(color='blue', edgecolor='black', figsize=(8, 8))
-    # Move window to specific position (x=100, y=100 pixels from top-left)
+    
     figManager = plt.get_current_fig_manager()
-    figManager.window.wm_geometry("+900+100")  # Change these numbers to position the window
+    figManager.window.wm_geometry("+900+100")
     
     house_plot.plot(ax=ax, color="yellow")
     houses.plot(ax=ax, color='red', edgecolor='black')
     road.plot(ax=ax, color="green")
 
-    # Only plot storage if it exists and has valid geometry
     if not storage.empty and 'geometry' in storage.columns:
         storage = storage.set_geometry('geometry')
         storage.plot(ax=ax, color="pink")
 
-    # Hide axis labels and ticks
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_xlabel('')
@@ -115,7 +115,6 @@ def visualise_house_plot(
         if event.key == 'a':
             plt.close()
 
-    # Connect the key press event to the callback function
     fig = ax.get_figure()
     fig.canvas.mpl_connect('key_press_event', on_key)
 
@@ -154,7 +153,6 @@ def calc_areas(
     if house.crs is None:
         raise ValueError("house.crs is None")
 
-    # If roads are provided, they must have a CRS. If roads is empty/None, that's OK.
     if roads is not None and not roads.empty and roads.crs is None:
         raise ValueError("roads.crs is None")
     plot_geom = _fix_geom(plot)
@@ -165,36 +163,26 @@ def calc_areas(
             f"plot_geom must be Polygon or MultiPolygon, got {type(plot_geom)}"
         )
 
-    # ----------------------
-    # Roads area (optional)
-    # ----------------------
     road_area = 0.0
     if roads is not None and not roads.empty:
         roads_fixed = roads.copy()
 
-        # Fix invalid road geometries
         bad = ~roads_fixed.geometry.is_valid
         if bad.any():
             roads_fixed.loc[bad, "geometry"] = roads_fixed.loc[bad, "geometry"].apply(_fix_geom)
 
-        # drop empties / Nones
         roads_fixed = roads_fixed[roads_fixed.geometry.notna() & ~roads_fixed.geometry.is_empty]
 
         if not roads_fixed.empty:
-            # Clip to plot
             try:
                 roads_in_plot = gpd.clip(roads_fixed, plot_geom)
             except Exception:
-                # fallback repair on plot (in case of topology issues)
                 plot_geom2 = _fix_geom(plot_geom)
                 print(type(plot_geom), type(plot_geom2))
                 roads_in_plot = gpd.clip(roads_fixed, plot_geom2)
 
             road_area = float(roads_in_plot.area.sum())
 
-    # ----------------------
-    # House area
-    # ----------------------
     house_geom = _fix_geom(house.geometry.iloc[0])
     house_area = float(house_geom.intersection(plot_geom).area)
 
@@ -212,7 +200,6 @@ def find_borders(
        returns: dict: with the neighbours as keys and the lines as values
     
     """
-    # The house we are checking
     plot_points = eenheid["geometry"]
 
     # All house in plot -> exclude the house we are checking
@@ -220,29 +207,27 @@ def find_borders(
     neighbours_found = {}
     eenheid_walls = _generate_lines(list(plot_points.exterior.coords))
 
-    # For every wall of the house
     for wall in eenheid_walls:
         
-        # For every neighbours house
-        # Check if walls overlap with the main eenheid.
         for _, neighbour in gdf_neighbours.iterrows():
             # Generate all possible lines from the polygon points
             eenheid_neighbour = neighbour["identificatie"]
             neighbour_polygon = neighbour['geometry']
             neighbour_walls = _generate_lines(list(neighbour_polygon.exterior.coords))
 
-            # Check every wall
             for neighbour_wall in neighbour_walls:
 
                 truncated_wall = truncate_coordinates(wall)
                 truncated_neighbour_walls = truncate_coordinates(neighbour_wall)
 
                 if truncated_wall.intersects(truncated_neighbour_walls):
-                    buf_truncated_wall = truncated_wall.buffer(0.0111)
-                    buf_truncated_neighbour_wall = truncated_neighbour_walls.buffer(0.0111)
+                    #TODO: create constant for buffer value
+                    buf_truncated_wall = truncated_wall.buffer(BUFFER_VALUE)
+                    buf_truncated_neighbour_wall = truncated_neighbour_walls.buffer(BUFFER_VALUE)
                     overlap = buf_truncated_wall.intersection(buf_truncated_neighbour_wall).length
 
-                    if overlap >= 2.0:
+                    #TODO: add constant
+                    if overlap >= OVERLAP_VALUE:
                         if eenheid_neighbour in neighbours_found:
                             continue
                         else:
