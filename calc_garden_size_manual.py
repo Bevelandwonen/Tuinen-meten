@@ -13,6 +13,12 @@ import utility
     Gebruik dit script om handmatig de tuinen in te meten.
 """
 
+PLOT_NUMBER = "Perceelnummer"
+PLOT_NUMBER_LEFT = "perceelLinks"
+PLOT_NUMBER_RIGHT = "perceelRechts"
+IDENTIFICATIE = "identificatie"
+BUILDING_ID = "Pand Id"
+
 def update_plot(ax, points):
     """Update plot with current points and lines."""
     ax.cla()  # Clear previous points
@@ -45,54 +51,45 @@ def key_press_handler(event, ax, points):
 
 if __name__ == "__main__": 
 
-    parser = argparse.ArgumentParser(description='Process garden data with optional custom bounding box')
-    parser.add_argument('--custom-bbox', action='store_true', help='Use custom bounding box instead of full dataset')
-    parser.add_argument('--bag-path', help='Path to BAG dataset')
-    parser.add_argument('--kadaster-path', help='Path to kadaster dataset')
-    parser.add_argument('--tobias-path', help='Path to Tobias Excel file')
-    parser.add_argument('--road-path', help='Path to road dataset')
-    parser.add_argument('--pand-path', help='Path to pand dataset')
-    parser.add_argument('--plot-eenheid-path', help='Path to plot-eenheid dataset')
-    args = parser.parse_args()
-
     config = utility.Config.default_config("set_garden_manual")
     bbox = None
 
-    if args.custom_bbox:
-        print("Using custom bounding box...")
-        bbox = utility.get_bbox_input()
-        print(f"Using bbox: {bbox}")
-    else:
-        print("Processing full dataset...")
+    gdf_bag, gdf_kad, _, gdf_road, gdf_bgt_pand, _, df_units, _, _ = utility.load_data(config, bbox)
+    df_units_filtered = df_units.dropna(subset=[PLOT_NUMBER])
 
-    gdf_bag, gdf_kad, _, gdf_road, gdf_bgt_pand, _, df_eenheid_nieuw, _, _ = utility.load_data(config, bbox)
-    df_eenheid_plot_filtered = df_eenheid_nieuw.dropna(subset=["Perceelnummer"])
-
-    for plotnummer in df_eenheid_plot_filtered["Perceelnummer"].unique():
-        df_plot_eenheden = df_eenheid_plot_filtered[df_eenheid_plot_filtered["Perceelnummer"] == plotnummer]
-        df_plot_eenheden.reset_index(drop=True, inplace=True)
-        gdf_plot = gdf_kad[(gdf_kad["perceelLinks"] == plotnummer) | (gdf_kad["perceelRechts"] == plotnummer)]
-        gdf_bag_temp = gdf_bag[gdf_bag["identificatie"].isin(df_plot_eenheden["Pand Id"])]
+    for plotnumber in df_units_filtered[PLOT_NUMBER].unique():
+        df_units_in_plot = df_units_filtered[df_units_filtered[PLOT_NUMBER] == plotnumber]
+        df_units_in_plot.reset_index(drop=True, inplace=True)
+        gdf_plot = gdf_kad[(gdf_kad[PLOT_NUMBER_LEFT] == plotnumber) |
+                           (gdf_kad[PLOT_NUMBER_RIGHT] == plotnumber)]
+        gdf_bag_temp = gdf_bag[gdf_bag[IDENTIFICATIE].isin(df_units_in_plot[BUILDING_ID])]
 
         try:
             plot_poly = Polygon(utility.create_plot_polygon(gdf_plot["geometry"]))
         except Exception:
             continue
 
-        if df_plot_eenheden.shape[0] > 1:
+        if df_units_in_plot.shape[0] > 1:
             aligned, line = utility.check_houses_aligned(gdf_bag_temp)
 
-            print("plot nummer:", plotnummer)
+            print("plot nummer:", plotnumber)
 
             for _, row in gdf_bag_temp.iterrows():
-                check_temp = df_eenheid_nieuw[df_eenheid_nieuw["Pand Id"] == row["identificatie"]]
+                df_unit_to_check = df_units[df_units[BUILDING_ID] == row[IDENTIFICATIE]]
                 # Only check houses that have not been processed yet 
                 #if check_temp["nieuw tuin opp"].values[0] == 0.0 and check_temp["oude tuin data"].values[0] == 0.0:
 
-                if check_temp["class"].values[0] == "errors":
-                    print(check_temp["BAG Naamgeving object"])
-                    print(check_temp["class"], check_temp["nieuw tuin opp"])
+                # Only check houses that have an error and thus not na or have not been processed yet
+                df_unit = df_unit_to_check.iloc[0]
+
+                if pd.isna(df_unit["nieuw tuin opp"]) or \
+                           df_unit["class"] != "" or \
+                           df_unit["nieuw tuin opp"] == 0.0:
+
+                    print(df_unit_to_check["BAG Naamgeving object"])
+                    print(df_unit_to_check["class"], df_unit_to_check["nieuw tuin opp"])
                     house = gdf_bag_temp[gdf_bag_temp["identificatie"] == row["identificatie"]]
+
                     ax = gdf_plot.plot(color='blue', edgecolor='black')
                     gdf_bag_temp.plot(ax=ax, color='red', edgecolor='black')
                     house.plot(ax=ax, color='yellow', edgecolor='black')
@@ -109,7 +106,6 @@ if __name__ == "__main__":
                     ax.legend()
                     plt.show()
                     
-                    # Create new small plot
                     if len(points) != 0:
                         points.append(points[0])
                         new_poly = Polygon(points)
@@ -118,15 +114,13 @@ if __name__ == "__main__":
                         storage, storage_size = utility.find_berging(new_poly, gdf_bgt_pand)
                         garden_size = utility.calc_areas(gdf_weg_temp, new_poly, house, storage_size)
                     else:
-                        # Ask the user for the first value
                         garden_size = float(input("Please enter garden: "))
 
-                        # Ask the user for the second value
                         storage_size = float(input("Please enter storage: "))
 
-                    df_eenheid_nieuw.loc[df_eenheid_nieuw["Pand Id"] == row["identificatie"], ['storage', 'nieuw tuin opp']] = [storage_size, garden_size]
+                    df_units.loc[df_units["Pand Id"] == row["identificatie"], ['storage', 'nieuw tuin opp']] = [storage_size, garden_size]
                     print(f"Storage size: {storage_size}, Garden size: {garden_size}")
 
-                    df_eenheid_nieuw.to_excel("data/open_manual/final.xlsx")
+                    df_units.to_excel("data/open_manual/final.xlsx")
 
 
